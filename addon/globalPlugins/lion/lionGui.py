@@ -97,8 +97,9 @@ class frmMain(wx.Frame):
 		row.Add(spin, 0, wx.ALL, 5)
 		sizer.Add(row, 0, wx.EXPAND)
 		return spin
-
-	def btnOk_click(self, event):
+	
+	def _validateInputs(self):
+		"""Validate threshold and interval inputs. Returns (threshold, interval) or (None, None) with error message."""
 		try:
 			threshold = float(self.txtThreshold.GetValue())
 			interval = float(self.txtInterval.GetValue())
@@ -106,19 +107,25 @@ class frmMain(wx.Frame):
 			# Validate threshold (0-1)
 			if threshold < 0.0 or threshold > 1.0:
 				ui.message(_("Threshold must be between 0 and 1"))
-				return
+				return None, None
 			
 			# Validate interval (> 0, use safe minimum)
 			if interval < 0.1:
 				ui.message(_("Interval must be at least 0.1 seconds"))
-				return
+				return None, None
 			
-			config.conf["lion"]["threshold"] = threshold
-			config.conf["lion"]["interval"] = interval
+			return threshold, interval
 		except ValueError:
 			ui.message(_("Invalid numeric value"))
+			return None, None
+
+	def btnOk_click(self, event):
+		threshold, interval = self._validateInputs()
+		if threshold is None:
 			return
 
+		config.conf["lion"]["threshold"] = threshold
+		config.conf["lion"]["interval"] = interval
 		config.conf["lion"]["target"] = self.choiceTarget.GetSelection()
 		config.conf["lion"]["cropLeft"] = int(self.spinCropLeft.GetValue())
 		config.conf["lion"]["cropRight"] = int(self.spinCropRight.GetValue())
@@ -133,21 +140,8 @@ class frmMain(wx.Frame):
 		self.Close()  # triggers onClose
 
 	def onSaveProfile(self, event):
-		try:
-			threshold = float(self.txtThreshold.GetValue())
-			interval = float(self.txtInterval.GetValue())
-			
-			# Validate threshold (0-1)
-			if threshold < 0.0 or threshold > 1.0:
-				ui.message(_("Threshold must be between 0 and 1"))
-				return
-			
-			# Validate interval (> 0, use safe minimum)
-			if interval < 0.1:
-				ui.message(_("Interval must be at least 0.1 seconds"))
-				return
-		except ValueError:
-			ui.message(_("Invalid numeric value"))
+		threshold, interval = self._validateInputs()
+		if threshold is None:
 			return
 		
 		appName = self.backend.currentAppProfile
