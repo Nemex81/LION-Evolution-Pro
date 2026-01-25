@@ -138,13 +138,12 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		if hasattr(self, "settingsDialog") and self.settingsDialog:
 			try:
 				self.settingsDialog.Raise()
+				self.settingsDialog.Show()
 				return
 			except Exception:
 				pass
-		gui.mainFrame.prePopup()
 		self.settingsDialog = lionGui.frmMain(gui.mainFrame, self)
 		self.settingsDialog.Show()
-		gui.mainFrame.postPopup()
 
 	def script_ReadLiveOcr(self, gesture):
 		repeat = getLastScriptRepeatCount()

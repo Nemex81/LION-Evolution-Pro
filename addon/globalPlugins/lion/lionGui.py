@@ -13,7 +13,7 @@ def getActiveProfileName():
 
 class frmMain(wx.Frame):
 	def __init__(self, parent, backend):
-		wx.Frame.__init__(self, parent, id=wx.ID_ANY, title=_("LION Settings"), style=wx.DEFAULT_FRAME_STYLE)
+		wx.Frame.__init__(self, parent, id=wx.ID_ANY, title=_("LION Settings"), style=wx.DEFAULT_FRAME_STYLE | wx.FRAME_FLOAT_ON_PARENT)
 		self.backend = backend
 		self.SetSize((400, 300))
 		
@@ -33,7 +33,6 @@ class frmMain(wx.Frame):
 		self.btnSaveProfile.Bind(wx.EVT_BUTTON, self.onSaveProfile)
 		self.btnResetProfile.Bind(wx.EVT_BUTTON, self.onResetProfile)
 		
-		self.Show()
 	
 	def onSaveProfile(self, event):
 		obj = api.getFocusObject()
