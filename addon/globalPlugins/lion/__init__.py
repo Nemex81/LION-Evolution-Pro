@@ -217,35 +217,12 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			cLeft, cUp, cRight, cDown = 0, 0, 0, 0
 		
 		# Calculate actual pixel values
-		left = int((r.left+r.width)*cLeft/100.0)
-		top = int((r.top+r.height)*cUp/100.0)
-		
-		# For right/down, the logic was: int(r.width-(r.width*cRight/100.0))
-		# This is WRONG if we want "width" as result.
-		# If cropRight is 10%, we want to exclude the last 10%.
-		# So newWidth = totalWidth - leftCrop - rightCrop
-		
-		totalWidth = r.width
-		totalHeight = r.height
-		
-		# Pixels to cut from right
-		cutRight = int(totalWidth * cRight / 100.0)
-		# Pixels to cut from bottom
-		cutDown = int(totalHeight * cDown / 100.0)
-		
-		# Final dimensions must be:
-		# Width = TotalWidth - (PixelsCutLeft + PixelsCutRight)
-		# BUT: the 'left' variable above IS "PixelsCutLeft" (because it's relative to r.left=0 usually)
-		
-		# Let's be precise:
-		# r.left is the starting X.
-		# newX = r.left + (r.width * cLeft / 100)
-		newX = int(r.left + (totalWidth * cLeft / 100.0))
-		newY = int(r.top + (totalHeight * cUp / 100.0))
+		newX = int(r.left + (r.width * cLeft / 100.0))
+		newY = int(r.top + (r.height * cUp / 100.0))
 		
 		# The remaining width is: TotalWidth - (LeftCropPixels + RightCropPixels)
-		newWidth = int(totalWidth * (100 - cLeft - cRight) / 100.0)
-		newHeight = int(totalHeight * (100 - cUp - cDown) / 100.0)
+		newWidth = int(r.width * (100 - cLeft - cRight) / 100.0)
+		newHeight = int(r.height * (100 - cUp - cDown) / 100.0)
 		
 		# Safety check to avoid negative or zero dimensions causing OCR crash
 		if newWidth <= 0: newWidth = 1
@@ -287,12 +264,14 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		recog.recognize(pixels, imgInfo, recog_onResult)
 	
 	def script_SetStartMarker(self, gesture):
+		logHandler.log.info("LION: script_SetStartMarker triggered")
 		pos = api.getMouseObject().location
 		# Store top-left of mouse pointer as the start point (x, y)
 		self.spotlightStartPoint = (pos.left, pos.top)
 		ui.message(_("Start marker set"))
 	
 	def script_SetEndMarker(self, gesture):
+		logHandler.log.info("LION: script_SetEndMarker triggered")
 		if not self.spotlightStartPoint:
 			ui.message(_("Set start marker first"))
 			return
@@ -336,6 +315,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		self.spotlightStartPoint = None
 
 	def script_ScanSpotlight(self, gesture):
+		logHandler.log.info("LION: script_ScanSpotlight triggered")
 		# Manual scan of the spotlight zone
 		ui.message(_("Scanning spotlight..."))
 		
