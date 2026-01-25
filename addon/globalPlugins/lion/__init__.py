@@ -84,6 +84,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		# Error handling state
 		self._errorCount = 0
 		self._lastErrorTime = 0
+		self._lastInvalidTargetWarnTime = 0  # Rate-limit target warning
 		self.createMenu()
 	
 	def getProfilePath(self, appName):
@@ -201,7 +202,11 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 				target = int(config.conf['lion']['target'])
 				target = max(0, min(3, target))
 			except (ValueError, TypeError, KeyError):
-				logHandler.log.warning(f"{ADDON_NAME}: Invalid target value, using default {DEFAULT_TARGET}")
+				# Rate-limit warning to avoid spam (max once per 30 seconds)
+				currentTime = time.time()
+				if currentTime - self._lastInvalidTargetWarnTime > 30:
+					logHandler.log.warning(f"{ADDON_NAME}: Invalid target value, using default {DEFAULT_TARGET}")
+					self._lastInvalidTargetWarnTime = currentTime
 				target = DEFAULT_TARGET
 		
 		if target == 0:
