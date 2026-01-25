@@ -35,6 +35,7 @@ STOP_THREAD_JOIN_TIMEOUT = 0.5  # seconds to wait for thread to stop
 ERROR_MESSAGE_RATE_LIMIT = 10.0  # seconds between repeated error messages
 ERROR_BACKOFF_THRESHOLD = 3  # number of errors before applying backoff
 ERROR_BACKOFF_DELAY = 2.0  # seconds to wait after repeated errors
+MIN_OCR_INTERVAL = 0.1  # minimum seconds between OCR iterations
 
 ADDON_NAME = "LionEvolutionPro"
 PROFILES_DIR = os.path.join(globalVars.appArgs.configPath, "addons", ADDON_NAME, "profiles")
@@ -326,8 +327,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 				try:
 					interval = float(self._getSetting('interval', 1.0))
 					# Enforce minimum interval at runtime
-					if interval < 0.1:
-						interval = 0.1
+					if interval < MIN_OCR_INTERVAL:
+						interval = MIN_OCR_INTERVAL
 				except (ValueError, TypeError):
 					logHandler.log.warning(f"{ADDON_NAME}: Invalid interval value, using default 1.0s")
 					interval = 1.0
