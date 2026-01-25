@@ -36,6 +36,7 @@ ERROR_MESSAGE_RATE_LIMIT = 10.0  # seconds between repeated error messages
 ERROR_BACKOFF_THRESHOLD = 3  # number of errors before applying backoff
 ERROR_BACKOFF_DELAY = 2.0  # seconds to wait after repeated errors
 MIN_OCR_INTERVAL = 0.1  # minimum seconds between OCR iterations
+DEFAULT_THRESHOLD = 0.5  # default similarity threshold for OCR text changes
 
 ADDON_NAME = "LionEvolutionPro"
 PROFILES_DIR = os.path.join(globalVars.appArgs.configPath, "addons", ADDON_NAME, "profiles")
@@ -355,12 +356,12 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		
 		# Get threshold from profile with robust parsing and clamping
 		try:
-			threshold = float(self._getSetting('threshold', 0.5))
+			threshold = float(self._getSetting('threshold', DEFAULT_THRESHOLD))
 			# Clamp threshold between 0.0 and 1.0 (consistent with GUI validation)
 			threshold = max(0.0, min(1.0, threshold))
 		except (ValueError, TypeError):
-			logHandler.log.warning(f"{ADDON_NAME}: Invalid threshold value, using default 0.5")
-			threshold = 0.5
+			logHandler.log.warning(f"{ADDON_NAME}: Invalid threshold value, using default {DEFAULT_THRESHOLD}")
+			threshold = DEFAULT_THRESHOLD
 		
 		recog.recognize(pixels, imgInfo, lambda result: recog_onResult(result, threshold, self._speak))
 	
