@@ -133,8 +133,6 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			pass
 
 	def onSettings(self, evt):
-		if gui.isInMessageBox:
-			return
 		if hasattr(self, "settingsDialog") and self.settingsDialog:
 			try:
 				self.settingsDialog.Raise()
