@@ -341,7 +341,11 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 
 	def OcrScreen(self, rect):
 		"""Perform OCR on the given rectangle using reusable recognizer."""
-		left, top, width, height = rect
+		# Robust rect unpacking using attributes (RectLTWH may not be iterable)
+		left = rect.left
+		top = rect.top
+		width = rect.width
+		height = rect.height
 		
 		recog = self._getRecognizer()
 		
@@ -349,8 +353,15 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		sb = screenBitmap.ScreenBitmap(imgInfo.recogWidth, imgInfo.recogHeight) 
 		pixels = sb.captureImage(left, top, width, height)
 		
-		# Get threshold from profile for use in callback
-		threshold = float(self._getSetting('threshold', 0.5))
+		# Get threshold from profile with robust parsing and clamping
+		try:
+			threshold = float(self._getSetting('threshold', 0.5))
+			# Clamp threshold between 0.0 and 1.0 (consistent with GUI validation)
+			threshold = max(0.0, min(1.0, threshold))
+		except (ValueError, TypeError):
+			logHandler.log.warning(f"{ADDON_NAME}: Invalid threshold value, using default 0.5")
+			threshold = 0.5
+		
 		recog.recognize(pixels, imgInfo, lambda result: recog_onResult(result, threshold, self._speak))
 	
 	def script_SetStartMarker(self, gesture):
