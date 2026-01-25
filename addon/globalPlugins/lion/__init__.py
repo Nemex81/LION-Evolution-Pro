@@ -55,6 +55,8 @@ confspec={
 config.conf.spec["lion"]=confspec
 class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 
+	currentAppProfile = "global"
+	currentProfileData = {}
 	
 	user32 = ctypes.windll.user32
 	resX, resY= user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)
@@ -63,6 +65,36 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 	def __init__(self):
 		super(GlobalPlugin, self).__init__()
 		self.createMenu()
+	
+	def getProfilePath(self, appName):
+		safeName = "".join(x for x in appName if x.isalnum() or x in "-_")
+		return os.path.join(PROFILES_DIR, f"{safeName}.json")
+	
+	def loadGlobalProfile(self):
+		self.currentAppProfile = "global"
+		self.currentProfileData = {
+			"cropLeft": config.conf["lion"]["cropLeft"],
+			"cropRight": config.conf["lion"]["cropRight"],
+			"cropUp": config.conf["lion"]["cropUp"],
+			"cropDown": config.conf["lion"]["cropDown"],
+			"threshold": config.conf["lion"]["threshold"],
+			"interval": config.conf["lion"]["interval"]
+		}
+		logHandler.log.info(f"{ADDON_NAME}: Loaded Global Profile")
+	
+	def loadProfileForApp(self, appName):
+		path = self.getProfilePath(appName)
+		if os.path.exists(path):
+			try:
+				with open(path, "r") as f:
+					self.currentProfileData = json.load(f)
+				self.currentAppProfile = appName
+				logHandler.log.info(f"{ADDON_NAME}: Loaded profile for {appName}")
+				return
+			except Exception as e:
+				logHandler.log.error(f"{ADDON_NAME}: Error loading {appName}: {e}")
+		
+		self.loadGlobalProfile()
 		
 	def createMenu(self):
 		self.prefsMenu = gui.mainFrame.sysTrayIcon.menu.GetMenuItems()[0].GetSubMenu()

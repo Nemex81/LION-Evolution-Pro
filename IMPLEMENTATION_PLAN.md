@@ -14,10 +14,10 @@ This document serves as the primary instruction manual and progress tracker for 
     - [x] 1.1 Update `manifest.ini` (Rename & Versioning)
     - [x] 1.2 Initialize `profiles` directory logic in `__init__.py`
 
-- [ ] **Phase 2: Backend Logic (State & I/O)**
-    - [ ] 2.1 Add State Variables (`currentAppProfile`, `currentProfileData`)
-    - [ ] 2.2 Implement `loadGlobalProfile()` method
-    - [ ] 2.3 Implement `getProfilePath()` and `loadProfileForApp()` methods
+- [x] **Phase 2: Backend Logic (State & I/O)**
+    - [x] 2.1 Add State Variables (`currentAppProfile`, `currentProfileData`)
+    - [x] 2.2 Implement `loadGlobalProfile()` method
+    - [x] 2.3 Implement `getProfilePath()` and `loadProfileForApp()` methods
 
 - [ ] **Phase 3: Event Listeners (The Trigger)**
     - [ ] 3.1 Implement `event_gainFocus` to detect app switching
