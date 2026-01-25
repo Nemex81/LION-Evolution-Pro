@@ -172,7 +172,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		if hasattr(obj, "appModule"):
 			newAppName = obj.appModule.appName
 			
-			if newAppName != self.currentAppProfile:
+			if newAppName != self.currentAppProfile and newAppName != "nvda":
 				self.loadProfileForApp(newAppName)
 				
 		nextHandler()
