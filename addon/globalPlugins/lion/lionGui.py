@@ -35,17 +35,17 @@ class frmMain(wx.Frame):
 		cropBox = wx.StaticBox(panel, label=_("Crop Settings (%)"))
 		cropSizer = wx.StaticBoxSizer(cropBox, wx.VERTICAL)
 
-		self.spinCropLeft = self._addSpin(cropSizer, panel, _("Crop Left"), int(data.get("cropLeft", 0)))
-		self.spinCropRight = self._addSpin(cropSizer, panel, _("Crop Right"), int(data.get("cropRight", 0)))
-		self.spinCropUp = self._addSpin(cropSizer, panel, _("Crop Up"), int(data.get("cropUp", 0)))
-		self.spinCropDown = self._addSpin(cropSizer, panel, _("Crop Down"), int(data.get("cropDown", 0)))
+		self.spinCropLeft = self._addSpin(cropSizer, cropBox, _("Crop Left"), int(data.get("cropLeft", 0)))
+		self.spinCropRight = self._addSpin(cropSizer, cropBox, _("Crop Right"), int(data.get("cropRight", 0)))
+		self.spinCropUp = self._addSpin(cropSizer, cropBox, _("Crop Up"), int(data.get("cropUp", 0)))
+		self.spinCropDown = self._addSpin(cropSizer, cropBox, _("Crop Down"), int(data.get("cropDown", 0)))
 
 		mainSizer.Add(cropSizer, 0, wx.ALL | wx.EXPAND, 5)
 
 		# OCR target
 		targetBox = wx.StaticBox(panel, label=_("OCR Target"))
 		targetSizer = wx.StaticBoxSizer(targetBox, wx.VERTICAL)
-		self.choiceTarget = wx.Choice(panel, choices=[
+		self.choiceTarget = wx.Choice(targetBox, choices=[
 			_("Navigator object"),
 			_("Whole Screen"),
 			_("Current window"),
@@ -57,19 +57,21 @@ class frmMain(wx.Frame):
 
 		# Threshold and interval
 		timingBox = wx.StaticBox(panel, label=_("Recognition"))
-		timingSizer = wx.FlexGridSizer(cols=2, hgap=5, vgap=5)
-		timingSizer.AddGrowableCol(1, 1)
+		timingSbSizer = wx.StaticBoxSizer(timingBox, wx.VERTICAL)
 
-		timingSizer.Add(wx.StaticText(panel, label=_("Threshold (0-1)")), 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
-		self.txtThreshold = wx.TextCtrl(panel, value=str(data.get("threshold", config.conf["lion"]["threshold"])))
-		timingSizer.Add(self.txtThreshold, 1, wx.ALL | wx.EXPAND, 5)
+		timingGrid = wx.FlexGridSizer(cols=2, hgap=5, vgap=5)
+		timingGrid.AddGrowableCol(1, 1)
 
-		timingSizer.Add(wx.StaticText(panel, label=_("Interval (seconds)")), 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
-		self.txtInterval = wx.TextCtrl(panel, value=str(data.get("interval", config.conf["lion"]["interval"])))
-		timingSizer.Add(self.txtInterval, 1, wx.ALL | wx.EXPAND, 5)
+		timingGrid.Add(wx.StaticText(timingBox, label=_("Threshold (0-1)")), 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
+		self.txtThreshold = wx.TextCtrl(timingBox, value=str(data.get("threshold", config.conf["lion"]["threshold"])))
+		timingGrid.Add(self.txtThreshold, 1, wx.ALL | wx.EXPAND, 5)
 
-		mainSizer.Add(timingBox, 0, wx.ALL | wx.EXPAND, 5)
-		timingBox.SetSizer(timingSizer)
+		timingGrid.Add(wx.StaticText(timingBox, label=_("Interval (seconds)")), 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
+		self.txtInterval = wx.TextCtrl(timingBox, value=str(data.get("interval", config.conf["lion"]["interval"])))
+		timingGrid.Add(self.txtInterval, 1, wx.ALL | wx.EXPAND, 5)
+
+		timingSbSizer.Add(timingGrid, 1, wx.EXPAND | wx.ALL, 5)
+		mainSizer.Add(timingSbSizer, 0, wx.ALL | wx.EXPAND, 5)
 
 		# Profile buttons
 		btnSizer = wx.BoxSizer(wx.HORIZONTAL)
@@ -93,10 +95,10 @@ class frmMain(wx.Frame):
 		self.btnSaveProfile.Bind(wx.EVT_BUTTON, self.onSaveProfile)
 		self.btnResetProfile.Bind(wx.EVT_BUTTON, self.onResetProfile)
 
-	def _addSpin(self, sizer, panel, label, value):
+	def _addSpin(self, sizer, parent, label, value):
 		row = wx.BoxSizer(wx.HORIZONTAL)
-		row.Add(wx.StaticText(panel, label=label), 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
-		spin = wx.SpinCtrl(panel, min=0, max=100, initial=value)
+		row.Add(wx.StaticText(parent, label=label), 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
+		spin = wx.SpinCtrl(parent, min=0, max=100, initial=value)
 		row.Add(spin, 0, wx.ALL, 5)
 		sizer.Add(row, 0, wx.EXPAND)
 		return spin
