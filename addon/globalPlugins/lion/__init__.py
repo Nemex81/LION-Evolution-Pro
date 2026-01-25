@@ -20,6 +20,9 @@ from scriptHandler import getLastScriptRepeatCount, script
 
 from difflib import SequenceMatcher
 import ctypes
+import os
+import json
+import globalVars
 
 
 addonHandler.initTranslation()
@@ -28,6 +31,16 @@ active=False
 prevString=""
 counter=0
 recog = contentRecog.uwpOcr.UwpOcr()
+
+ADDON_NAME = "LionEvolutionPro"
+PROFILES_DIR = os.path.join(globalVars.appArgs.configPath, "addons", ADDON_NAME, "profiles")
+
+if not os.path.exists(PROFILES_DIR):
+	try:
+		os.makedirs(PROFILES_DIR)
+		logHandler.log.info(f"{ADDON_NAME}: Profiles directory created at {PROFILES_DIR}")
+	except Exception as e:
+		logHandler.log.error(f"{ADDON_NAME}: Failed to create profiles directory: {e}")
 
 
 confspec={

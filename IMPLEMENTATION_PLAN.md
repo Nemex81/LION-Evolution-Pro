@@ -10,9 +10,9 @@ This document serves as the primary instruction manual and progress tracker for 
 ## 📋 Progress Tracking (Agent Checklist)
 *The coding agent must update this section after each successful commit.*
 
-- [ ] **Phase 1: Infrastructure & Setup**
-    - [ ] 1.1 Update `manifest.ini` (Rename & Versioning)
-    - [ ] 1.2 Initialize `profiles` directory logic in `__init__.py`
+- [x] **Phase 1: Infrastructure & Setup**
+    - [x] 1.1 Update `manifest.ini` (Rename & Versioning)
+    - [x] 1.2 Initialize `profiles` directory logic in `__init__.py`
 
 - [ ] **Phase 2: Backend Logic (State & I/O)**
     - [ ] 2.1 Add State Variables (`currentAppProfile`, `currentProfileData`)
