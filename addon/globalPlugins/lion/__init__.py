@@ -121,9 +121,9 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		self.prefsMenu = gui.mainFrame.sysTrayIcon.menu.GetMenuItems()[0].GetSubMenu()
 		self.lionSettingsItem = self.prefsMenu.Append(wx.ID_ANY,
 			# Translators: name of the option in the menu.
-			_("&LION Settings..."),
+			_("&Lion Evolution Pro settings..."),
 			# Translators: tooltip text for the menu item.
-			_("modify OCR zone and interval"))
+			_("Modify OCR zone, interval and per-app profiles"))
 		gui.mainFrame.sysTrayIcon.Bind(wx.EVT_MENU, self.onSettings, self.lionSettingsItem)
 
 	def terminate(self):
@@ -144,7 +144,6 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		repeat = getLastScriptRepeatCount()
 #		if repeat>=2:
 #			ui.message("o sa vine profile")
-			return
 		global active
 		
 		if(active==False):

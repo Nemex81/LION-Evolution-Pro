@@ -199,6 +199,13 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 
 ---
 
+## 🐛 Bugfixes
+- Removed stray `return` in `script_ReadLiveOcr` to restore NVDA+Alt+L toggle behavior.
+- Updated menu label and dialog wiring so “Lion Evolution Pro settings” appears under NVDA Preferences and opens the correct dialog.
+- Aligned master with the working implementation from `copilot/infrastructure-setup`.
+
+---
+
 ## 📝 Commit Guidelines for Agent
 1.  **Read First:** Always check the "Progress Tracking" section to see what is next.
 2.  **Atomic Commits:** Do not bundle Phase 1 and Phase 2 in one commit. Keep them separate.
