@@ -85,6 +85,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		self._errorCount = 0
 		self._lastErrorTime = 0
 		self._lastInvalidTargetWarnTime = 0  # Rate-limit target warning
+		# Lock for OCR state (prevString/counter) - future-proof thread safety
+		self._ocrStateLock = threading.Lock()
 		self.createMenu()
 	
 	def getProfilePath(self, appName):
@@ -382,7 +384,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			logHandler.log.warning(f"{ADDON_NAME}: Invalid threshold value, using default {DEFAULT_THRESHOLD}")
 			threshold = DEFAULT_THRESHOLD
 		
-		recog.recognize(pixels, imgInfo, lambda result: recog_onResult(result, threshold, self._speak))
+		recog.recognize(pixels, imgInfo, lambda result: recog_onResult(result, threshold, self._speak, self._ocrStateLock))
 	
 	def script_SetStartMarker(self, gesture):
 		logHandler.log.info("LION: script_SetStartMarker triggered")
@@ -478,25 +480,30 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		"kb:nvda+shift+l": "ScanSpotlight"
 	}
 	
-def recog_onResult(result, threshold, speak_func):
+def recog_onResult(result, threshold, speak_func, ocr_state_lock):
 	"""
-	OCR result callback with thread-safe UI output.
+	OCR result callback with thread-safe UI output and state management.
 	
 	Args:
 		result: OCR result object
 		threshold: similarity threshold from profile
 		speak_func: thread-safe function to output text
+		ocr_state_lock: threading.Lock for protecting prevString/counter access
 	"""
 	global prevString
 	global counter
-	counter += 1
+	
 	o = type('NVDAObjects.NVDAObject', (), {})()
 	info = result.makeTextInfo(o, textInfos.POSITION_ALL)
-	similarity = SequenceMatcher(None, prevString, info.text).ratio()
 	
-	if similarity < threshold and info.text != "" and info.text != "Play":
-		speak_func(info.text)
-		prevString = info.text
-	
-	if counter > 9:
-		counter = 0
+	# Thread-safe access to global OCR state
+	with ocr_state_lock:
+		counter += 1
+		similarity = SequenceMatcher(None, prevString, info.text).ratio()
+		
+		if similarity < threshold and info.text != "" and info.text != "Play":
+			speak_func(info.text)
+			prevString = info.text
+		
+		if counter > 9:
+			counter = 0
