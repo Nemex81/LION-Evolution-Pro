@@ -37,6 +37,7 @@ ERROR_BACKOFF_THRESHOLD = 3  # number of errors before applying backoff
 ERROR_BACKOFF_DELAY = 2.0  # seconds to wait after repeated errors
 MIN_OCR_INTERVAL = 0.1  # minimum seconds between OCR iterations
 DEFAULT_THRESHOLD = 0.5  # default similarity threshold for OCR text changes
+DEFAULT_TARGET = 1  # default OCR target (whole screen)
 
 ADDON_NAME = "LionEvolutionPro"
 PROFILES_DIR = os.path.join(globalVars.appArgs.configPath, "addons", ADDON_NAME, "profiles")
@@ -189,7 +190,20 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 	
 	def _getCurrentTargetBaseRect(self):
 		"""Compute the base rectangle for current OCR target (before cropping)."""
-		target = int(self._getSetting('target', config.conf['lion']['target']))
+		# Robust target parsing with fallback and clamping
+		try:
+			target = int(self._getSetting('target', config.conf['lion']['target']))
+			# Clamp to valid range (0..3)
+			target = max(0, min(3, target))
+		except (ValueError, TypeError):
+			# Fallback to global config or default on parse error
+			try:
+				target = int(config.conf['lion']['target'])
+				target = max(0, min(3, target))
+			except (ValueError, TypeError, KeyError):
+				logHandler.log.warning(f"{ADDON_NAME}: Invalid target value, using default {DEFAULT_TARGET}")
+				target = DEFAULT_TARGET
+		
 		if target == 0:
 			return api.getNavigatorObject().location
 		if target == 1:
