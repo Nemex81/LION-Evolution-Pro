@@ -195,7 +195,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			target = int(self._getSetting('target', config.conf['lion']['target']))
 			# Clamp to valid range (0..3)
 			target = max(0, min(3, target))
-		except (ValueError, TypeError):
+		except (ValueError, TypeError, KeyError):
 			# Fallback to global config or default on parse error
 			try:
 				target = int(config.conf['lion']['target'])
