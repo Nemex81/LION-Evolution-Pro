@@ -3,11 +3,7 @@ import addonHandler
 import gui
 import config
 import ui
-import os
-import json
-import globalPluginHandler
-import locationHelper
-from . import __init__ as lionBackend
+import api
 addonHandler.initTranslation()
 
 def getActiveProfileName():
@@ -40,7 +36,8 @@ class frmMain(wx.Frame):
 		self.Show()
 	
 	def onSaveProfile(self, event):
-		appName = gui.mainFrame.focusObject.appModule.appName if hasattr(gui.mainFrame.focusObject, "appModule") else "global"
+		obj = api.getFocusObject()
+		appName = obj.appModule.appName if hasattr(obj, "appModule") else "global"
 		data = {
 			"cropLeft": config.conf["lion"]["cropLeft"],
 			"cropRight": config.conf["lion"]["cropRight"],
@@ -55,7 +52,8 @@ class frmMain(wx.Frame):
 		ui.message(_("profile saved"))
 	
 	def onResetProfile(self, event):
-		appName = gui.mainFrame.focusObject.appModule.appName if hasattr(gui.mainFrame.focusObject, "appModule") else "global"
+		obj = api.getFocusObject()
+		appName = obj.appModule.appName if hasattr(obj, "appModule") else "global"
 		self.backend.deleteProfileForApp(appName)
 		gui.mainFrame.lionActiveProfile = "global"
 		self.lblActiveProfile.SetLabel(_("Active Profile: global"))

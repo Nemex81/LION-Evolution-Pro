@@ -135,9 +135,15 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 	def onSettings(self, evt):
 		if gui.isInMessageBox:
 			return
+		if hasattr(self, "settingsDialog") and self.settingsDialog:
+			try:
+				self.settingsDialog.Raise()
+				return
+			except Exception:
+				pass
 		gui.mainFrame.prePopup()
-		d = lionGui.frmMain(gui.mainFrame, self)
-		d.Show()
+		self.settingsDialog = lionGui.frmMain(gui.mainFrame, self)
+		self.settingsDialog.Show()
 		gui.mainFrame.postPopup()
 
 	def script_ReadLiveOcr(self, gesture):
