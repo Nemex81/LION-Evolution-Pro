@@ -140,10 +140,34 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			tones.beep(222,333)
 			ui.message(("lion stopped"))
 			
+	def event_gainFocus(self, obj, nextHandler):
+		if hasattr(obj, "appModule"):
+			newAppName = obj.appModule.appName
+			
+			if newAppName != self.currentAppProfile:
+				self.loadProfileForApp(newAppName)
+				
+		nextHandler()
+
 	def cropRectLTWH(self, r):
-		cfg=config.conf["lion" ]
+		cfg = self.currentProfileData if self.currentProfileData else config.conf["lion"]
+		
 		if r is None: return locationHelper.RectLTWH(0,0,0,0)
-		return locationHelper.RectLTWH(int((r.left+r.width)*cfg['cropLeft']/100.0), int((r.top+r.height)*cfg['cropUp']/100.0), int(r.width-(r.width*cfg['cropRight']/100.0)), int(r.height-(r.height*cfg['cropDown']/100.0)))
+		
+		try:
+			cLeft = int(cfg.get("cropLeft", 0))
+			cUp = int(cfg.get("cropUp", 0))
+			cRight = int(cfg.get("cropRight", 0))
+			cDown = int(cfg.get("cropDown", 0))
+		except (ValueError, TypeError):
+			cLeft, cUp, cRight, cDown = 0, 0, 0, 0
+		
+		return locationHelper.RectLTWH(
+			int((r.left+r.width)*cLeft/100.0), 
+			int((r.top+r.height)*cUp/100.0), 
+			int(r.width-(r.width*cRight/100.0)), 
+			int(r.height-(r.height*cDown/100.0))
+		)
 	
 	def ocrLoop(self):
 		cfg=config.conf["lion" ]

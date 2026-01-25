@@ -19,13 +19,13 @@ This document serves as the primary instruction manual and progress tracker for 
     - [x] 2.2 Implement `loadGlobalProfile()` method
     - [x] 2.3 Implement `getProfilePath()` and `loadProfileForApp()` methods
 
-- [ ] **Phase 3: Event Listeners (The Trigger)**
-    - [ ] 3.1 Implement `event_gainFocus` to detect app switching
-    - [ ] 3.2 Add logic to trigger profile loading on focus change
+- [x] **Phase 3: Event Listeners (The Trigger)**
+    - [x] 3.1 Implement `event_gainFocus` to detect app switching
+    - [x] 3.2 Add logic to trigger profile loading on focus change
 
-- [ ] **Phase 4: Core Integration (OCR Engine)**
-    - [ ] 4.1 Refactor `cropRectLTWH` to use dynamic `currentProfileData`
-    - [ ] 4.2 Verify/Refactor `ocrLoop` variables (if necessary)
+- [x] **Phase 4: Core Integration (OCR Engine)**
+    - [x] 4.1 Refactor `cropRectLTWH` to use dynamic `currentProfileData`
+    - [x] 4.2 Verify/Refactor `ocrLoop` variables (if necessary)
 
 - [ ] **Phase 5: GUI Enhancements**
     - [ ] 5.1 Add "Active Profile" label to `LionGui`
