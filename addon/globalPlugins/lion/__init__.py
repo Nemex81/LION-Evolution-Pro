@@ -30,6 +30,12 @@ addonHandler.initTranslation()
 prevString=""
 counter=0
 
+# Constants for threading and error handling
+STOP_THREAD_JOIN_TIMEOUT = 0.5  # seconds to wait for thread to stop
+ERROR_MESSAGE_RATE_LIMIT = 10.0  # seconds between repeated error messages
+ERROR_BACKOFF_THRESHOLD = 3  # number of errors before applying backoff
+ERROR_BACKOFF_DELAY = 2.0  # seconds to wait after repeated errors
+
 ADDON_NAME = "LionEvolutionPro"
 PROFILES_DIR = os.path.join(globalVars.appArgs.configPath, "addons", ADDON_NAME, "profiles")
 
@@ -171,7 +177,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		self._stopEvent.set()
 		# Optional brief join to allow clean stop without blocking NVDA
 		if self._workerThread and self._workerThread.is_alive():
-			self._workerThread.join(timeout=0.5)
+			self._workerThread.join(timeout=STOP_THREAD_JOIN_TIMEOUT)
 	
 	def _getRecognizer(self):
 		"""Get or create UwpOcr recognizer instance."""
@@ -302,19 +308,18 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 					self._ocrRecognizer = None
 					
 					# Error spam prevention: rate-limit error messages
-					import time as time_module
-					currentTime = time_module.time()
+					currentTime = time.time()
 					self._errorCount += 1
 					
-					# Only speak error if: first error OR more than 10s since last error message
-					if self._errorCount == 1 or (currentTime - self._lastErrorTime) > 10:
+					# Only speak error if: first error OR more than rate limit seconds since last error message
+					if self._errorCount == 1 or (currentTime - self._lastErrorTime) > ERROR_MESSAGE_RATE_LIMIT:
 						self._speak(_("OCR error"))
 						self._lastErrorTime = currentTime
 					
-					# Backoff on repeated errors: wait longer after 3+ consecutive errors
-					if self._errorCount >= 3:
+					# Backoff on repeated errors: wait longer after threshold consecutive errors
+					if self._errorCount >= ERROR_BACKOFF_THRESHOLD:
 						logHandler.log.warning(f"{ADDON_NAME}: Multiple errors ({self._errorCount}), applying backoff")
-						self._stopEvent.wait(2.0)  # Extra 2s backoff
+						self._stopEvent.wait(ERROR_BACKOFF_DELAY)  # Extra backoff delay
 						continue
 				
 				# Interruptible sleep using profile-aware interval with robust parsing
