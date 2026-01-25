@@ -7,13 +7,6 @@ import api
 
 addonHandler.initTranslation()
 
-
-def getActiveProfileName():
-	if hasattr(gui.mainFrame, "lionActiveProfile"):
-		return gui.mainFrame.lionActiveProfile
-	return "global"
-
-
 class frmMain(wx.Frame):
 	def __init__(self, parent, backend):
 		wx.Frame.__init__(self, parent, id=wx.ID_ANY, title=_("LION Settings"), style=wx.DEFAULT_FRAME_STYLE | wx.FRAME_FLOAT_ON_PARENT)
@@ -28,7 +21,7 @@ class frmMain(wx.Frame):
 		panel.SetSizer(mainSizer)
 
 		# Active profile label
-		self.lblActiveProfile = wx.StaticText(panel, label=_("Active Profile: ") + getActiveProfileName())
+		self.lblActiveProfile = wx.StaticText(panel, label=_("Active Profile: ") + backend.currentAppProfile)
 		mainSizer.Add(self.lblActiveProfile, 0, wx.ALL, 5)
 
 		# Crop settings
@@ -125,8 +118,7 @@ class frmMain(wx.Frame):
 		self.Close()  # triggers onClose
 
 	def onSaveProfile(self, event):
-		obj = api.getFocusObject()
-		appName = obj.appModule.appName if hasattr(obj, "appModule") else "global"
+		appName = self.backend.currentAppProfile
 		data = {
 			"cropLeft": int(self.spinCropLeft.GetValue()),
 			"cropRight": int(self.spinCropRight.GetValue()),
@@ -136,15 +128,12 @@ class frmMain(wx.Frame):
 			"interval": float(self.txtInterval.GetValue())
 		}
 		self.backend.saveProfileForApp(appName, data)
-		gui.mainFrame.lionActiveProfile = appName
 		self.lblActiveProfile.SetLabel(_("Active Profile: ") + appName)
 		ui.message(_("profile saved"))
 
 	def onResetProfile(self, event):
-		obj = api.getFocusObject()
-		appName = obj.appModule.appName if hasattr(obj, "appModule") else "global"
+		appName = self.backend.currentAppProfile
 		self.backend.deleteProfileForApp(appName)
-		gui.mainFrame.lionActiveProfile = "global"
 		self.lblActiveProfile.SetLabel(_("Active Profile: global"))
 		# Reload global values
 		self.spinCropLeft.SetValue(int(config.conf["lion"]["cropLeft"]))
