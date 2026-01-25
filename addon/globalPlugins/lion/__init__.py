@@ -139,9 +139,14 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 				self.settingsDialog.Show()
 				return
 			except Exception:
-				pass
-		self.settingsDialog = lionGui.frmMain(gui.mainFrame, self)
-		self.settingsDialog.Show()
+				self.settingsDialog = None
+		try:
+			self.settingsDialog = lionGui.frmMain(gui.mainFrame, self)
+			self.settingsDialog.Show()
+		except Exception as e:
+			logHandler.log.error(f\"{ADDON_NAME}: Error creating settings dialog: {e}\")
+			self.settingsDialog = None
+			ui.message(\"Error opening settings\")
 
 	def script_ReadLiveOcr(self, gesture):
 		repeat = getLastScriptRepeatCount()

@@ -19,6 +19,7 @@ class frmMain(wx.Frame):
 		wx.Frame.__init__(self, parent, id=wx.ID_ANY, title=_("LION Settings"), style=wx.DEFAULT_FRAME_STYLE | wx.FRAME_FLOAT_ON_PARENT)
 		self.backend = backend
 		self.SetSize((420, 420))
+		self.Bind(wx.EVT_CLOSE, self.onClose)
 
 		data = backend.currentProfileData if backend.currentProfileData else config.conf["lion"]
 
@@ -115,11 +116,11 @@ class frmMain(wx.Frame):
 		config.conf["lion"]["cropDown"] = int(self.spinCropDown.GetValue())
 
 		ui.message(_("settings saved"))
-		self.Close()
+		self.Close()  # triggers onClose
 
 	def btnCancel_click(self, event):
 		ui.message(_("changes canceled"))
-		self.Close()
+		self.Close()  # triggers onClose
 
 	def onSaveProfile(self, event):
 		obj = api.getFocusObject()
@@ -151,3 +152,7 @@ class frmMain(wx.Frame):
 		self.txtThreshold.SetValue(str(config.conf["lion"]["threshold"]))
 		self.txtInterval.SetValue(str(config.conf["lion"]["interval"]))
 		ui.message(_("profile reset"))
+
+	def onClose(self, event):
+		self.backend.settingsDialog = None
+		self.Destroy()
