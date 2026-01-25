@@ -155,11 +155,12 @@ class frmMain(wx.Frame):
 			"target": self.choiceTarget.GetSelection()
 		}
 		
-		# Include spotlight crop values from current profile if they exist
-		if self.backend.currentProfileData:
-			for key in ["spotlight_cropLeft", "spotlight_cropRight", "spotlight_cropUp", "spotlight_cropDown"]:
-				if key in self.backend.currentProfileData:
-					data[key] = self.backend.currentProfileData[key]
+		# Always save spotlight crop values (from profile if exists, else from global config)
+		for key in ["spotlight_cropLeft", "spotlight_cropRight", "spotlight_cropUp", "spotlight_cropDown"]:
+			if self.backend.currentProfileData and key in self.backend.currentProfileData:
+				data[key] = self.backend.currentProfileData[key]
+			else:
+				data[key] = config.conf["lion"][key]
 		
 		self.backend.saveProfileForApp(appName, data)
 		self.lblActiveProfile.SetLabel(_("Active Profile: ") + appName)

@@ -72,6 +72,9 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		self._stopEvent = threading.Event()
 		self._workerThread = None
 		self._ocrRecognizer = None
+		# Error handling state
+		self._errorCount = 0
+		self._lastErrorTime = 0
 		self.createMenu()
 	
 	def getProfilePath(self, appName):
@@ -166,6 +169,9 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 	def _stopLiveOcr(self):
 		"""Signal live OCR worker thread to stop."""
 		self._stopEvent.set()
+		# Optional brief join to allow clean stop without blocking NVDA
+		if self._workerThread and self._workerThread.is_alive():
+			self._workerThread.join(timeout=0.5)
 	
 	def _getRecognizer(self):
 		"""Get or create UwpOcr recognizer instance."""
@@ -277,27 +283,55 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		"""Live OCR worker loop with dynamic target rectangles and interruptible sleep."""
 		logHandler.log.info(f"{ADDON_NAME}: Live OCR loop started")
 		
-		while not self._stopEvent.is_set():
-			try:
-				# Recompute target rectangle dynamically every iteration
-				rect = self._getCurrentTargetRect()
+		try:
+			while not self._stopEvent.is_set():
+				try:
+					# Recompute target rectangle dynamically every iteration
+					rect = self._getCurrentTargetRect()
+					
+					# Validate rect dimensions
+					if rect.width <= 0 or rect.height <= 0:
+						logHandler.log.warning(f"{ADDON_NAME}: Invalid target rect, skipping OCR iteration")
+					else:
+						self.OcrScreen(rect)
+						# Reset error count on successful OCR
+						self._errorCount = 0
+				except Exception as e:
+					logHandler.log.error(f"{ADDON_NAME}: Error in OCR loop: {e}")
+					# Reset recognizer on failure
+					self._ocrRecognizer = None
+					
+					# Error spam prevention: rate-limit error messages
+					import time as time_module
+					currentTime = time_module.time()
+					self._errorCount += 1
+					
+					# Only speak error if: first error OR more than 10s since last error message
+					if self._errorCount == 1 or (currentTime - self._lastErrorTime) > 10:
+						self._speak(_("OCR error"))
+						self._lastErrorTime = currentTime
+					
+					# Backoff on repeated errors: wait longer after 3+ consecutive errors
+					if self._errorCount >= 3:
+						logHandler.log.warning(f"{ADDON_NAME}: Multiple errors ({self._errorCount}), applying backoff")
+						self._stopEvent.wait(2.0)  # Extra 2s backoff
+						continue
 				
-				# Validate rect dimensions
-				if rect.width <= 0 or rect.height <= 0:
-					logHandler.log.warning(f"{ADDON_NAME}: Invalid target rect, skipping OCR iteration")
-				else:
-					self.OcrScreen(rect)
-			except Exception as e:
-				logHandler.log.error(f"{ADDON_NAME}: Error in OCR loop: {e}")
-				# Reset recognizer on failure
-				self._ocrRecognizer = None
-				self._speak(_("OCR error"))
-			
-			# Interruptible sleep using profile-aware interval
-			interval = float(self._getSetting('interval', 1.0))
-			self._stopEvent.wait(interval)
-		
-		logHandler.log.info(f"{ADDON_NAME}: Live OCR loop stopped")
+				# Interruptible sleep using profile-aware interval with robust parsing
+				try:
+					interval = float(self._getSetting('interval', 1.0))
+					# Enforce minimum interval at runtime
+					if interval < 0.1:
+						interval = 0.1
+				except (ValueError, TypeError):
+					logHandler.log.warning(f"{ADDON_NAME}: Invalid interval value, using default 1.0s")
+					interval = 1.0
+				
+				self._stopEvent.wait(interval)
+		finally:
+			# Always reset worker thread reference on exit
+			self._workerThread = None
+			logHandler.log.info(f"{ADDON_NAME}: Live OCR loop stopped")
 
 	def OcrScreen(self, rect):
 		"""Perform OCR on the given rectangle using reusable recognizer."""
