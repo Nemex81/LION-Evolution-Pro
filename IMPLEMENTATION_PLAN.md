@@ -27,14 +27,14 @@ This document serves as the primary instruction manual and progress tracker for 
     - [x] 4.1 Refactor `cropRectLTWH` to use dynamic `currentProfileData`
     - [x] 4.2 Verify/Refactor `ocrLoop` variables (if necessary)
 
-- [ ] **Phase 5: GUI Enhancements**
-    - [ ] 5.1 Add "Active Profile" label to `LionGui`
-    - [ ] 5.2 Add "Save Profile" and "Reset" buttons to layout
+- [x] **Phase 5: GUI Enhancements**
+    - [x] 5.1 Add "Active Profile" label to `LionGui`
+    - [x] 5.2 Add "Save Profile" and "Reset" buttons to layout
 
-- [ ] **Phase 6: GUI Logic & Persistence**
-    - [ ] 6.1 Implement `onSaveProfile` handler (connect GUI to Backend)
-    - [ ] 6.2 Implement `onResetProfile` handler
-    - [ ] 6.3 Implement backend `saveProfileForApp` and `deleteProfileForApp` methods
+- [x] **Phase 6: GUI Logic & Persistence**
+    - [x] 6.1 Implement `onSaveProfile` handler (connect GUI to Backend)
+    - [x] 6.2 Implement `onResetProfile` handler
+    - [x] 6.3 Implement backend `saveProfileForApp` and `deleteProfileForApp` methods
 
 ---
 

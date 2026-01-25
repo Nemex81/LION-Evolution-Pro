@@ -95,6 +95,27 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 				logHandler.log.error(f"{ADDON_NAME}: Error loading {appName}: {e}")
 		
 		self.loadGlobalProfile()
+	
+	def saveProfileForApp(self, appName, data):
+		path = self.getProfilePath(appName)
+		try:
+			with open(path, "w", encoding="utf-8") as f:
+				json.dump(data, f)
+			self.currentAppProfile = appName
+			self.currentProfileData = data
+			logHandler.log.info(f"{ADDON_NAME}: Saved profile for {appName}")
+		except Exception as e:
+			logHandler.log.error(f"{ADDON_NAME}: Error saving profile for {appName}: {e}")
+	
+	def deleteProfileForApp(self, appName):
+		path = self.getProfilePath(appName)
+		if os.path.exists(path):
+			try:
+				os.remove(path)
+				logHandler.log.info(f"{ADDON_NAME}: Deleted profile for {appName}")
+			except Exception as e:
+				logHandler.log.error(f"{ADDON_NAME}: Error deleting profile for {appName}: {e}")
+		self.loadGlobalProfile()
 		
 	def createMenu(self):
 		self.prefsMenu = gui.mainFrame.sysTrayIcon.menu.GetMenuItems()[0].GetSubMenu()
@@ -115,7 +136,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		if gui.isInMessageBox:
 			return
 		gui.mainFrame.prePopup()
-		d = lionGui.frmMain(gui.mainFrame)
+		d = lionGui.frmMain(gui.mainFrame, self)
 		d.Show()
 		gui.mainFrame.postPopup()
 
