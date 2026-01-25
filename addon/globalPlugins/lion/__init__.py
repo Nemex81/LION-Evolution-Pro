@@ -26,11 +26,9 @@ import globalVars
 
 
 addonHandler.initTranslation()
-active=False
 
 prevString=""
 counter=0
-recog = contentRecog.uwpOcr.UwpOcr()
 
 ADDON_NAME = "LionEvolutionPro"
 PROFILES_DIR = os.path.join(globalVars.appArgs.configPath, "addons", ADDON_NAME, "profiles")
@@ -70,6 +68,10 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 	
 	def __init__(self):
 		super(GlobalPlugin, self).__init__()
+		# Threading & lifecycle state
+		self._stopEvent = threading.Event()
+		self._workerThread = None
+		self._ocrRecognizer = None
 		self.createMenu()
 	
 	def getProfilePath(self, appName):
@@ -88,7 +90,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			"spotlight_cropUp": config.conf["lion"]["spotlight_cropUp"],
 			"spotlight_cropDown": config.conf["lion"]["spotlight_cropDown"],
 			"threshold": config.conf["lion"]["threshold"],
-			"interval": config.conf["lion"]["interval"]
+			"interval": config.conf["lion"]["interval"],
+			"target": config.conf["lion"]["target"]
 		}
 		logHandler.log.info(f"{ADDON_NAME}: Loaded Global Profile")
 	
@@ -115,7 +118,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			"spotlight_cropUp": config.conf["lion"]["spotlight_cropUp"],
 			"spotlight_cropDown": config.conf["lion"]["spotlight_cropDown"],
 			"threshold": config.conf["lion"]["threshold"],
-			"interval": config.conf["lion"]["interval"]
+			"interval": config.conf["lion"]["interval"],
+			"target": config.conf["lion"]["target"]
 		}
 		self.currentAppProfile = appName
 		logHandler.log.info(f"{ADDON_NAME}: Loaded global defaults for new app context: {appName}")
@@ -140,6 +144,50 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			except Exception as e:
 				logHandler.log.error(f"{ADDON_NAME}: Error deleting profile for {appName}: {e}")
 		self.loadGlobalProfile()
+	
+	def _getSetting(self, key, default=None):
+		"""Unified accessor: profile value with fallback to global config."""
+		if self.currentProfileData and key in self.currentProfileData:
+			return self.currentProfileData.get(key, default)
+		return config.conf['lion'].get(key, default)
+	
+	def _speak(self, text):
+		"""Thread-safe UI output via NVDA event queue."""
+		queueHandler.queueFunction(queueHandler.eventQueue, ui.message, text)
+	
+	def _startLiveOcr(self):
+		"""Start live OCR worker thread if not already running."""
+		if self._workerThread and self._workerThread.is_alive():
+			return
+		self._stopEvent.clear()
+		self._workerThread = threading.Thread(target=self.ocrLoop, daemon=True)
+		self._workerThread.start()
+	
+	def _stopLiveOcr(self):
+		"""Signal live OCR worker thread to stop."""
+		self._stopEvent.set()
+	
+	def _getRecognizer(self):
+		"""Get or create UwpOcr recognizer instance."""
+		if self._ocrRecognizer is None:
+			self._ocrRecognizer = contentRecog.uwpOcr.UwpOcr()
+		return self._ocrRecognizer
+	
+	def _getCurrentTargetBaseRect(self):
+		"""Compute the base rectangle for current OCR target (before cropping)."""
+		target = int(self._getSetting('target', config.conf['lion']['target']))
+		if target == 0:
+			return api.getNavigatorObject().location
+		if target == 1:
+			return locationHelper.RectLTWH(0, 0, self.resX, self.resY)
+		if target == 2:
+			return api.getForegroundObject().location
+		return api.getFocusObject().location
+	
+	def _getCurrentTargetRect(self):
+		"""Compute the current OCR target rectangle (after cropping)."""
+		base = self._getCurrentTargetBaseRect()
+		return self.cropRectLTWH(base)
 		
 	def createMenu(self):
 		self.prefsMenu = gui.mainFrame.sysTrayIcon.menu.GetMenuItems()[0].GetSubMenu()
@@ -151,6 +199,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		gui.mainFrame.sysTrayIcon.Bind(wx.EVT_MENU, self.onSettings, self.lionSettingsItem)
 
 	def terminate(self):
+		# Stop live OCR worker thread before terminating
+		self._stopLiveOcr()
 		try:
 			self.prefsMenu.RemoveItem(self.lionSettingsItem)
 		except wx.PyDeadObjectError:
@@ -174,23 +224,18 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 
 	def script_ReadLiveOcr(self, gesture):
 		repeat = getLastScriptRepeatCount()
-#		if repeat>=2:
-#			ui.message("o sa vine profile")
-		global active
 		
-		if(active==False):
-			active=True
-			tones.beep(444,333)
+		# Check if live OCR is currently running
+		isRunning = self._workerThread and self._workerThread.is_alive()
+		
+		if not isRunning:
+			self._startLiveOcr()
+			tones.beep(444, 333)
 			ui.message(_("lion started"))
-			nav=api.getNavigatorObject()
-
-			threading.Thread(target=self.ocrLoop).start()
-		
 		else:
-			
-			active=False
-			tones.beep(222,333)
-			ui.message(("lion stopped"))
+			self._stopLiveOcr()
+			tones.beep(222, 333)
+			ui.message(_("lion stopped"))
 			
 	def event_gainFocus(self, obj, nextHandler):
 		if hasattr(obj, "appModule"):
@@ -202,17 +247,15 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		nextHandler()
 
 	def cropRectLTWH(self, r, useSpotlight=False):
-		cfg = self.currentProfileData if self.currentProfileData else config.conf["lion"]
-		
 		if r is None: return locationHelper.RectLTWH(0,0,0,0)
 		
 		prefix = "spotlight_" if useSpotlight else ""
 		
 		try:
-			cLeft = int(cfg.get(f"{prefix}cropLeft", 0))
-			cUp = int(cfg.get(f"{prefix}cropUp", 0))
-			cRight = int(cfg.get(f"{prefix}cropRight", 0))
-			cDown = int(cfg.get(f"{prefix}cropDown", 0))
+			cLeft = int(self._getSetting(f"{prefix}cropLeft", 0))
+			cUp = int(self._getSetting(f"{prefix}cropUp", 0))
+			cRight = int(self._getSetting(f"{prefix}cropRight", 0))
+			cDown = int(self._getSetting(f"{prefix}cropDown", 0))
 		except (ValueError, TypeError):
 			cLeft, cUp, cRight, cDown = 0, 0, 0, 0
 		
@@ -231,37 +274,44 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		return locationHelper.RectLTWH(newX, newY, newWidth, newHeight)
 	
 	def ocrLoop(self):
-		cfg=config.conf["lion" ]
+		"""Live OCR worker loop with dynamic target rectangles and interruptible sleep."""
+		logHandler.log.info(f"{ADDON_NAME}: Live OCR loop started")
 		
-		self.targets={
-			0:api.getNavigatorObject().location,
-			#1:locationHelper.RectLTRB(int(cfg["cropLeft"]*self.resX/100.0), int(cfg["cropUp"]*self.resY/100.0), int(self.resX-cfg["cropRight"]*self.resX/100.0), int(self.resY-cfg["cropDown"]*self.resY/100.0)).toLTWH(),
-			1:self.cropRectLTWH(locationHelper.RectLTWH(0,0, self.resX, self.resY)),
-			2:self.cropRectLTWH(api.getForegroundObject().location),
-			3:api.getFocusObject().location
-		}
-		#print( self.targets)
-		global active
-
-
-		while(active==True ):
-			self.OcrScreen()
-			time.sleep(config.conf["lion"]["interval"])
-
-	def OcrScreen(self):
+		while not self._stopEvent.is_set():
+			try:
+				# Recompute target rectangle dynamically every iteration
+				rect = self._getCurrentTargetRect()
+				
+				# Validate rect dimensions
+				if rect.width <= 0 or rect.height <= 0:
+					logHandler.log.warning(f"{ADDON_NAME}: Invalid target rect, skipping OCR iteration")
+				else:
+					self.OcrScreen(rect)
+			except Exception as e:
+				logHandler.log.error(f"{ADDON_NAME}: Error in OCR loop: {e}")
+				# Reset recognizer on failure
+				self._ocrRecognizer = None
+				self._speak(_("OCR error"))
+			
+			# Interruptible sleep using profile-aware interval
+			interval = float(self._getSetting('interval', 1.0))
+			self._stopEvent.wait(interval)
 		
-		global recog
-		
-		
+		logHandler.log.info(f"{ADDON_NAME}: Live OCR loop stopped")
 
-		left,top, width,height=self.targets[config.conf["lion"]["target"]]
+	def OcrScreen(self, rect):
+		"""Perform OCR on the given rectangle using reusable recognizer."""
+		left, top, width, height = rect
 		
-		recog = contentRecog.uwpOcr.UwpOcr()
-
+		recog = self._getRecognizer()
+		
 		imgInfo = contentRecog.RecogImageInfo.createFromRecognizer(left, top, width, height, recog)
 		sb = screenBitmap.ScreenBitmap(imgInfo.recogWidth, imgInfo.recogHeight) 
-		pixels = sb.captureImage(left, top, width, height) 
-		recog.recognize(pixels, imgInfo, recog_onResult)
+		pixels = sb.captureImage(left, top, width, height)
+		
+		# Get threshold from profile for use in callback
+		threshold = float(self._getSetting('threshold', 0.5))
+		recog.recognize(pixels, imgInfo, lambda result: recog_onResult(result, threshold, self._speak))
 	
 	def script_SetStartMarker(self, gesture):
 		logHandler.log.info("LION: script_SetStartMarker triggered")
@@ -340,9 +390,10 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 				o = type('NVDAObjects.NVDAObject', (), {})()
 				info = result.makeTextInfo(o, textInfos.POSITION_ALL)
 				if info.text:
-					ui.message(info.text)
+					# Thread-safe UI output
+					queueHandler.queueFunction(queueHandler.eventQueue, ui.message, info.text)
 				else:
-					ui.message(_("No text found"))
+					queueHandler.queueFunction(queueHandler.eventQueue, ui.message, _("No text found"))
 
 			recog.recognize(pixels, imgInfo, on_spotlight_result)
 		except Exception as e:
@@ -356,18 +407,25 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		"kb:nvda+shift+l": "ScanSpotlight"
 	}
 	
-def recog_onResult(result):
+def recog_onResult(result, threshold, speak_func):
+	"""
+	OCR result callback with thread-safe UI output.
+	
+	Args:
+		result: OCR result object
+		threshold: similarity threshold from profile
+		speak_func: thread-safe function to output text
+	"""
 	global prevString
-	global recog
 	global counter
-	counter+=1
-	o=type('NVDAObjects.NVDAObject', (), {})()
-	info=result.makeTextInfo(o, textInfos.POSITION_ALL)
-	threshold=SequenceMatcher(None, prevString, info.text).ratio()
-	if threshold<config.conf['lion']['threshold'] and info.text!="" and info.text!="Play":
-		ui.message(info.text)
-		prevString=info.text
-
-	if counter>9:
-		del recog
-		counter=0
+	counter += 1
+	o = type('NVDAObjects.NVDAObject', (), {})()
+	info = result.makeTextInfo(o, textInfos.POSITION_ALL)
+	similarity = SequenceMatcher(None, prevString, info.text).ratio()
+	
+	if similarity < threshold and info.text != "" and info.text != "Play":
+		speak_func(info.text)
+		prevString = info.text
+	
+	if counter > 9:
+		counter = 0

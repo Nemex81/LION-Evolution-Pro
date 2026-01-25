@@ -44,7 +44,9 @@ class frmMain(wx.Frame):
 			_("Current window"),
 			_("Current control")
 		])
-		self.choiceTarget.SetSelection(int(config.conf["lion"]["target"]))
+		# Load target from profile or global config
+		target_value = int(data.get("target", config.conf["lion"]["target"]))
+		self.choiceTarget.SetSelection(target_value)
 		targetSizer.Add(self.choiceTarget, 0, wx.ALL | wx.EXPAND, 5)
 		mainSizer.Add(targetSizer, 0, wx.ALL | wx.EXPAND, 5)
 
@@ -98,8 +100,21 @@ class frmMain(wx.Frame):
 
 	def btnOk_click(self, event):
 		try:
-			config.conf["lion"]["threshold"] = float(self.txtThreshold.GetValue())
-			config.conf["lion"]["interval"] = float(self.txtInterval.GetValue())
+			threshold = float(self.txtThreshold.GetValue())
+			interval = float(self.txtInterval.GetValue())
+			
+			# Validate threshold (0-1)
+			if threshold < 0.0 or threshold > 1.0:
+				ui.message(_("Threshold must be between 0 and 1"))
+				return
+			
+			# Validate interval (> 0, use safe minimum)
+			if interval < 0.1:
+				ui.message(_("Interval must be at least 0.1 seconds"))
+				return
+			
+			config.conf["lion"]["threshold"] = threshold
+			config.conf["lion"]["interval"] = interval
 		except ValueError:
 			ui.message(_("Invalid numeric value"))
 			return
@@ -118,15 +133,40 @@ class frmMain(wx.Frame):
 		self.Close()  # triggers onClose
 
 	def onSaveProfile(self, event):
+		try:
+			threshold = float(self.txtThreshold.GetValue())
+			interval = float(self.txtInterval.GetValue())
+			
+			# Validate threshold (0-1)
+			if threshold < 0.0 or threshold > 1.0:
+				ui.message(_("Threshold must be between 0 and 1"))
+				return
+			
+			# Validate interval (> 0, use safe minimum)
+			if interval < 0.1:
+				ui.message(_("Interval must be at least 0.1 seconds"))
+				return
+		except ValueError:
+			ui.message(_("Invalid numeric value"))
+			return
+		
 		appName = self.backend.currentAppProfile
 		data = {
 			"cropLeft": int(self.spinCropLeft.GetValue()),
 			"cropRight": int(self.spinCropRight.GetValue()),
 			"cropUp": int(self.spinCropUp.GetValue()),
 			"cropDown": int(self.spinCropDown.GetValue()),
-			"threshold": float(self.txtThreshold.GetValue()),
-			"interval": float(self.txtInterval.GetValue())
+			"threshold": threshold,
+			"interval": interval,
+			"target": self.choiceTarget.GetSelection()
 		}
+		
+		# Include spotlight crop values from current profile if they exist
+		if self.backend.currentProfileData:
+			for key in ["spotlight_cropLeft", "spotlight_cropRight", "spotlight_cropUp", "spotlight_cropDown"]:
+				if key in self.backend.currentProfileData:
+					data[key] = self.backend.currentProfileData[key]
+		
 		self.backend.saveProfileForApp(appName, data)
 		self.lblActiveProfile.SetLabel(_("Active Profile: ") + appName)
 		ui.message(_("profile saved"))
@@ -135,13 +175,14 @@ class frmMain(wx.Frame):
 		appName = self.backend.currentAppProfile
 		self.backend.deleteProfileForApp(appName)
 		self.lblActiveProfile.SetLabel(_("Active Profile: global"))
-		# Reload global values
+		# Reload global values into GUI
 		self.spinCropLeft.SetValue(int(config.conf["lion"]["cropLeft"]))
 		self.spinCropRight.SetValue(int(config.conf["lion"]["cropRight"]))
 		self.spinCropUp.SetValue(int(config.conf["lion"]["cropUp"]))
 		self.spinCropDown.SetValue(int(config.conf["lion"]["cropDown"]))
 		self.txtThreshold.SetValue(str(config.conf["lion"]["threshold"]))
 		self.txtInterval.SetValue(str(config.conf["lion"]["interval"]))
+		self.choiceTarget.SetSelection(int(config.conf["lion"]["target"]))
 		ui.message(_("profile reset"))
 
 	def onClose(self, event):

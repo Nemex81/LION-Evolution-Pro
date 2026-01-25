@@ -25,30 +25,30 @@ Non-goals (for this phase):
 ## Phase 7 — Progress Tracker (update after each commit)
 
 ### 7.1 Threading & lifecycle (highest priority)
-- [ ] 7.1.1 Replace global `active` flag with `threading.Event` stop mechanism.
-- [ ] 7.1.2 Ensure only one live OCR worker thread runs at a time.
-- [ ] 7.1.3 Ensure worker is stopped in `terminate()`.
+- [x] 7.1.1 Replace global `active` flag with `threading.Event` stop mechanism.
+- [x] 7.1.2 Ensure only one live OCR worker thread runs at a time.
+- [x] 7.1.3 Ensure worker is stopped in `terminate()`.
 
 ### 7.2 UI thread safety (high priority)
-- [ ] 7.2.1 Route all UI output from worker/callbacks via `queueHandler.queueFunction(queueHandler.eventQueue, ...)`.
-- [ ] 7.2.2 Ensure no direct `ui.message()` runs on non-NVDA threads.
+- [x] 7.2.1 Route all UI output from worker/callbacks via `queueHandler.queueFunction(queueHandler.eventQueue, ...)`.
+- [x] 7.2.2 Ensure no direct `ui.message()` runs on non-NVDA threads.
 
 ### 7.3 Dynamic target rectangles (high priority)
-- [ ] 7.3.1 Recompute OCR target rectangle on every loop iteration.
-- [ ] 7.3.2 Centralize target resolution logic (navigator / whole screen / foreground window / focus).
+- [x] 7.3.1 Recompute OCR target rectangle on every loop iteration.
+- [x] 7.3.2 Centralize target resolution logic (navigator / whole screen / foreground window / focus).
 
 ### 7.4 Profiles fully effective (high priority)
-- [ ] 7.4.1 Add a unified accessor: profile → global fallback.
-- [ ] 7.4.2 Make **interval**, **threshold**, **target**, and crop keys profile-aware.
-- [ ] 7.4.3 Make spotlight crop keys (`spotlight_*`) profile-aware.
+- [x] 7.4.1 Add a unified accessor: profile → global fallback.
+- [x] 7.4.2 Make **interval**, **threshold**, **target**, and crop keys profile-aware.
+- [x] 7.4.3 Make spotlight crop keys (`spotlight_*`) profile-aware.
 
 ### 7.5 Efficiency & error handling (medium priority)
-- [ ] 7.5.1 Reuse a `UwpOcr` instance; recreate only on failure.
-- [ ] 7.5.2 Add safe error handling inside the OCR loop; optional backoff.
+- [x] 7.5.1 Reuse a `UwpOcr` instance; recreate only on failure.
+- [x] 7.5.2 Add safe error handling inside the OCR loop; optional backoff.
 
 ### 7.6 GUI & persistence alignment (medium priority)
-- [ ] 7.6.1 Ensure GUI “Save Profile” persists all relevant keys (at minimum: crop*, threshold, interval, target).
-- [ ] 7.6.2 Ensure GUI “Reset Profile” restores global values and refreshes controls.
+- [x] 7.6.1 Ensure GUI “Save Profile” persists all relevant keys (at minimum: crop*, threshold, interval, target).
+- [x] 7.6.2 Ensure GUI “Reset Profile” restores global values and refreshes controls.
 
 ### 7.7 Verification (required)
 - [ ] 7.7.1 Manual test plan executed (start/stop stress test + app switching).
