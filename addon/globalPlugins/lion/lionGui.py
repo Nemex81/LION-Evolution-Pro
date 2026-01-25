@@ -44,8 +44,19 @@ class frmMain(wx.Frame):
 			_("Current window"),
 			_("Current control")
 		])
-		# Load target from profile or global config
-		target_value = int(data.get("target", config.conf["lion"]["target"]))
+		# Load target from profile with robust parsing
+		try:
+			target_value = int(data.get("target", config.conf["lion"]["target"]))
+			# Clamp to valid range [0..3]
+			target_value = max(0, min(3, target_value))
+		except (ValueError, TypeError, KeyError):
+			# Fallback to global config or default (1 = whole screen)
+			try:
+				target_value = int(config.conf["lion"]["target"])
+				target_value = max(0, min(3, target_value))
+			except (ValueError, TypeError, KeyError):
+				target_value = 1  # Default to whole screen
+		
 		self.choiceTarget.SetSelection(target_value)
 		targetSizer.Add(self.choiceTarget, 0, wx.ALL | wx.EXPAND, 5)
 		mainSizer.Add(targetSizer, 0, wx.ALL | wx.EXPAND, 5)
