@@ -45,18 +45,7 @@ class frmMain(wx.Frame):
 			_("Current control")
 		])
 		# Load target from profile with robust parsing
-		try:
-			target_value = int(data.get("target", config.conf["lion"]["target"]))
-			# Clamp to valid range [0..3]
-			target_value = max(0, min(3, target_value))
-		except (ValueError, TypeError, KeyError):
-			# Fallback to global config or default (1 = whole screen)
-			try:
-				target_value = int(config.conf["lion"]["target"])
-				target_value = max(0, min(3, target_value))
-			except (ValueError, TypeError, KeyError):
-				target_value = 1  # Default to whole screen
-		
+		target_value = self._getSafeTargetSelection(data)
 		self.choiceTarget.SetSelection(target_value)
 		targetSizer.Add(self.choiceTarget, 0, wx.ALL | wx.EXPAND, 5)
 		mainSizer.Add(targetSizer, 0, wx.ALL | wx.EXPAND, 5)
@@ -108,6 +97,28 @@ class frmMain(wx.Frame):
 		row.Add(spin, 0, wx.ALL, 5)
 		sizer.Add(row, 0, wx.EXPAND)
 		return spin
+	
+	def _getSafeTargetSelection(self, value_or_data):
+		"""
+		Safely parse and clamp target value from profile data or config value.
+		Returns a valid target index [0..3] with fallback to 1 (whole screen).
+		"""
+		try:
+			# Handle dict-like data (from profile) or direct value (from config)
+			if isinstance(value_or_data, dict):
+				target_value = int(value_or_data.get("target", config.conf["lion"]["target"]))
+			else:
+				target_value = int(value_or_data)
+			# Clamp to valid range [0..3]
+			target_value = max(0, min(3, target_value))
+		except (ValueError, TypeError, KeyError):
+			# Fallback to global config or default (1 = whole screen)
+			try:
+				target_value = int(config.conf["lion"]["target"])
+				target_value = max(0, min(3, target_value))
+			except (ValueError, TypeError, KeyError):
+				target_value = 1  # Default to whole screen
+		return target_value
 	
 	def _validateInputs(self):
 		"""Validate threshold and interval inputs. Returns (threshold, interval) or (None, None) with error message."""
@@ -188,7 +199,9 @@ class frmMain(wx.Frame):
 		self.spinCropDown.SetValue(int(config.conf["lion"]["cropDown"]))
 		self.txtThreshold.SetValue(str(config.conf["lion"]["threshold"]))
 		self.txtInterval.SetValue(str(config.conf["lion"]["interval"]))
-		self.choiceTarget.SetSelection(int(config.conf["lion"]["target"]))
+		# Use robust target parsing with fallback
+		target_value = self._getSafeTargetSelection(config.conf["lion"]["target"])
+		self.choiceTarget.SetSelection(target_value)
 		ui.message(_("profile reset"))
 
 	def onClose(self, event):
