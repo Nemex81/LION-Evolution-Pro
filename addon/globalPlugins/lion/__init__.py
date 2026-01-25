@@ -94,7 +94,17 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			except Exception as e:
 				logHandler.log.error(f"{ADDON_NAME}: Error loading {appName}: {e}")
 		
-		self.loadGlobalProfile()
+		# Fallback: Load global defaults but set the CURRENT APP name so we can save it later
+		self.currentProfileData = {
+			"cropLeft": config.conf["lion"]["cropLeft"],
+			"cropRight": config.conf["lion"]["cropRight"],
+			"cropUp": config.conf["lion"]["cropUp"],
+			"cropDown": config.conf["lion"]["cropDown"],
+			"threshold": config.conf["lion"]["threshold"],
+			"interval": config.conf["lion"]["interval"]
+		}
+		self.currentAppProfile = appName
+		logHandler.log.info(f"{ADDON_NAME}: Loaded global defaults for new app context: {appName}")
 	
 	def saveProfileForApp(self, appName, data):
 		path = self.getProfilePath(appName)
