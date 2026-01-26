@@ -106,8 +106,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			try:
 				with open(path, "r") as f:
 					data = json.load(f)
-				# Filter out any legacy spotlight keys for compatibility
-				self.currentProfileData = {k: v for k, v in data.items() if not k.startswith("spotlight_")}
+				self.currentProfileData = data
 				self.currentAppProfile = appName
 				logHandler.log.info(f"{ADDON_NAME}: Loaded profile for {appName}")
 				return
