@@ -47,12 +47,22 @@ Non-goals (for this phase):
 - [x] 7.5.2 Add safe error handling inside the OCR loop; optional backoff.
 
 ### 7.6 GUI & persistence alignment (medium priority)
-- [x] 7.6.1 Ensure GUI “Save Profile” persists all relevant keys (at minimum: crop*, threshold, interval, target).
-- [x] 7.6.2 Ensure GUI “Reset Profile” restores global values and refreshes controls.
+- [x] 7.6.1 Ensure GUI "Save Profile" persists all relevant keys (at minimum: crop*, threshold, interval, target).
+- [x] 7.6.2 Ensure GUI "Reset Profile" restores global values and refreshes controls.
 
-### 7.7 Verification (required)
-- [ ] 7.7.1 Manual test plan executed (start/stop stress test + app switching).
-- [ ] 7.7.2 NVDA log review: no unhandled exceptions from LionEvolution Pro.
+### 7.8 Spotlight/Marker Removal (completed)
+- [x] 7.8.1 Removed spotlight script methods (SetStartMarker, SetEndMarker, ScanSpotlight).
+- [x] 7.8.2 Removed spotlight gestures (NVDA+Shift+1, NVDA+Shift+2, NVDA+Shift+L).
+- [x] 7.8.3 Removed spotlight_crop* keys from confspec.
+- [x] 7.8.4 Removed spotlight_crop* from profile loading/saving logic.
+- [x] 7.8.5 Simplified cropRectLTWH() to remove useSpotlight parameter.
+- [x] 7.8.6 Updated GUI to save only core profile settings (crop*, threshold, interval, target).
+
+**Note**: Spotlight/Marker functionality was removed intentionally to return closer to the original add-on behavior while maintaining the per-app profile system implemented in Phase 7. The feature may be redesigned and reintroduced in a future phase if needed. Existing profiles with spotlight keys are automatically filtered for backwards compatibility.
+
+### 7.9 Verification (required)
+- [ ] 7.9.1 Manual test plan executed (start/stop stress test + app switching).
+- [ ] 7.9.2 NVDA log review: no unhandled exceptions from LionEvolution Pro.
 
 ---
 
