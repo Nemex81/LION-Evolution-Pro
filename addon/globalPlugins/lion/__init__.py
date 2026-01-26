@@ -73,8 +73,6 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 	user32 = ctypes.windll.user32
 	resX, resY= user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)
 	
-	spotlightStartPoint = None
-	
 	def __init__(self):
 		super(GlobalPlugin, self).__init__()
 		# Threading & lifecycle state
@@ -386,98 +384,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		
 		recog.recognize(pixels, imgInfo, lambda result: recog_onResult(result, threshold, self._speak, self._ocrStateLock))
 	
-	def script_SetStartMarker(self, gesture):
-		logHandler.log.info("LION: script_SetStartMarker triggered")
-		pos = api.getMouseObject().location
-		# Store top-left of mouse pointer as the start point (x, y)
-		self.spotlightStartPoint = (pos.left, pos.top)
-		ui.message(_("Start marker set"))
-	
-	def script_SetEndMarker(self, gesture):
-		logHandler.log.info("LION: script_SetEndMarker triggered")
-		if not self.spotlightStartPoint:
-			ui.message(_("Set start marker first"))
-			return
-			
-		pos = api.getMouseObject().location
-		endX, endY = pos.left, pos.top
-		startX, startY = self.spotlightStartPoint
-		
-		# Calculate screen dimensions from global config or system metrics
-		screenWidth = self.resX
-		screenHeight = self.resY
-		
-		# Ensure start is top-left and end is bottom-right regardless of selection order
-		left = min(startX, endX)
-		top = min(startY, endY)
-		right = max(startX, endX)
-		bottom = max(startY, endY)
-		
-		# Calculate percentages relative to full screen
-		# Left % = (Left Coord / Width) * 100
-		pLeft = int((left / screenWidth) * 100)
-		pUp = int((top / screenHeight) * 100)
-		
-		# Right % = ((Width - Right Coord) / Width) * 100
-		pRight = int(((screenWidth - right) / screenWidth) * 100)
-		pDown = int(((screenHeight - bottom) / screenHeight) * 100)
-		
-		# Update current profile data
-		if not self.currentProfileData:
-			self.currentProfileData = config.conf["lion"]
-			
-		self.currentProfileData["spotlight_cropLeft"] = pLeft
-		self.currentProfileData["spotlight_cropRight"] = pRight
-		self.currentProfileData["spotlight_cropUp"] = pUp
-		self.currentProfileData["spotlight_cropDown"] = pDown
-		
-		# Save immediately to persist
-		self.saveProfileForApp(self.currentAppProfile, self.currentProfileData)
-		
-		ui.message(_("Spotlight zone saved"))
-		self.spotlightStartPoint = None
-
-	def script_ScanSpotlight(self, gesture):
-		logHandler.log.info("LION: script_ScanSpotlight triggered")
-		# Manual scan of the spotlight zone
-		ui.message(_("Scanning spotlight..."))
-		
-		# Calculate rect based on spotlight settings
-		# Spotlight is always relative to SCREEN (target=1 equivalent)
-		
-		r = locationHelper.RectLTWH(0, 0, self.resX, self.resY)
-		rect = self.cropRectLTWH(r, useSpotlight=True)
-		
-		# Validate rect before OCR to avoid "Image not visible" error
-		if rect.width <= 0 or rect.height <= 0:
-			ui.message(_("Invalid spotlight area"))
-			return
-
-		try:
-			recog = contentRecog.uwpOcr.UwpOcr()
-			imgInfo = contentRecog.RecogImageInfo.createFromRecognizer(rect.left, rect.top, rect.width, rect.height, recog)
-			sb = screenBitmap.ScreenBitmap(imgInfo.recogWidth, imgInfo.recogHeight) 
-			pixels = sb.captureImage(rect.left, rect.top, rect.width, rect.height) 
-			
-			def on_spotlight_result(result):
-				o = type('NVDAObjects.NVDAObject', (), {})()
-				info = result.makeTextInfo(o, textInfos.POSITION_ALL)
-				if info.text:
-					# Thread-safe UI output
-					queueHandler.queueFunction(queueHandler.eventQueue, ui.message, info.text)
-				else:
-					queueHandler.queueFunction(queueHandler.eventQueue, ui.message, _("No text found"))
-
-			recog.recognize(pixels, imgInfo, on_spotlight_result)
-		except Exception as e:
-			logHandler.log.error(f"Spotlight OCR failed: {e}")
-			ui.message(_("OCR error"))
-
 	__gestures={
-		"kb:nvda+alt+l":"ReadLiveOcr",
-		"kb:nvda+shift+1": "SetStartMarker",
-		"kb:nvda+shift+2": "SetEndMarker",
-		"kb:nvda+shift+l": "ScanSpotlight"
+		"kb:nvda+alt+l":"ReadLiveOcr"
 	}
 	
 def recog_onResult(result, threshold, speak_func, ocr_state_lock):
