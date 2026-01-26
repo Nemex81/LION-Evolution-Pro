@@ -94,10 +94,6 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			"cropRight": config.conf["lion"]["cropRight"],
 			"cropUp": config.conf["lion"]["cropUp"],
 			"cropDown": config.conf["lion"]["cropDown"],
-			"spotlight_cropLeft": config.conf["lion"]["spotlight_cropLeft"],
-			"spotlight_cropRight": config.conf["lion"]["spotlight_cropRight"],
-			"spotlight_cropUp": config.conf["lion"]["spotlight_cropUp"],
-			"spotlight_cropDown": config.conf["lion"]["spotlight_cropDown"],
 			"threshold": config.conf["lion"]["threshold"],
 			"interval": config.conf["lion"]["interval"],
 			"target": config.conf["lion"]["target"]
@@ -109,7 +105,9 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		if os.path.exists(path):
 			try:
 				with open(path, "r") as f:
-					self.currentProfileData = json.load(f)
+					data = json.load(f)
+				# Filter out any legacy spotlight keys for compatibility
+				self.currentProfileData = {k: v for k, v in data.items() if not k.startswith("spotlight_")}
 				self.currentAppProfile = appName
 				logHandler.log.info(f"{ADDON_NAME}: Loaded profile for {appName}")
 				return
@@ -122,10 +120,6 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			"cropRight": config.conf["lion"]["cropRight"],
 			"cropUp": config.conf["lion"]["cropUp"],
 			"cropDown": config.conf["lion"]["cropDown"],
-			"spotlight_cropLeft": config.conf["lion"]["spotlight_cropLeft"],
-			"spotlight_cropRight": config.conf["lion"]["spotlight_cropRight"],
-			"spotlight_cropUp": config.conf["lion"]["spotlight_cropUp"],
-			"spotlight_cropDown": config.conf["lion"]["spotlight_cropDown"],
 			"threshold": config.conf["lion"]["threshold"],
 			"interval": config.conf["lion"]["interval"],
 			"target": config.conf["lion"]["target"]
@@ -275,16 +269,14 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 				
 		nextHandler()
 
-	def cropRectLTWH(self, r, useSpotlight=False):
+	def cropRectLTWH(self, r):
 		if r is None: return locationHelper.RectLTWH(0,0,0,0)
 		
-		prefix = "spotlight_" if useSpotlight else ""
-		
 		try:
-			cLeft = int(self._getSetting(f"{prefix}cropLeft", 0))
-			cUp = int(self._getSetting(f"{prefix}cropUp", 0))
-			cRight = int(self._getSetting(f"{prefix}cropRight", 0))
-			cDown = int(self._getSetting(f"{prefix}cropDown", 0))
+			cLeft = int(self._getSetting("cropLeft", 0))
+			cUp = int(self._getSetting("cropUp", 0))
+			cRight = int(self._getSetting("cropRight", 0))
+			cDown = int(self._getSetting("cropDown", 0))
 		except (ValueError, TypeError):
 			cLeft, cUp, cRight, cDown = 0, 0, 0, 0
 		
