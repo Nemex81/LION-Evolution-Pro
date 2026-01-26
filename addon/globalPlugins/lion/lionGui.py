@@ -58,12 +58,18 @@ class frmMain(wx.Frame):
 		timingGrid.AddGrowableCol(1, 1)
 
 		timingGrid.Add(wx.StaticText(timingBox, label=_("Threshold (0-1)")), 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
-		self.txtThreshold = wx.TextCtrl(timingBox, value=str(data.get("threshold", config.conf["lion"]["threshold"])))
-		timingGrid.Add(self.txtThreshold, 1, wx.ALL | wx.EXPAND, 5)
+		self.spinThreshold = wx.SpinCtrlDouble(timingBox, 
+			min=0.0, max=1.0, initial=float(data.get("threshold", config.conf["lion"]["threshold"])),
+			inc=0.01, style=wx.SP_ARROW_KEYS)
+		self.spinThreshold.SetDigits(2)
+		timingGrid.Add(self.spinThreshold, 1, wx.ALL | wx.EXPAND, 5)
 
 		timingGrid.Add(wx.StaticText(timingBox, label=_("Interval (seconds)")), 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
-		self.txtInterval = wx.TextCtrl(timingBox, value=str(data.get("interval", config.conf["lion"]["interval"])))
-		timingGrid.Add(self.txtInterval, 1, wx.ALL | wx.EXPAND, 5)
+		self.spinInterval = wx.SpinCtrlDouble(timingBox,
+			min=0.1, max=10.0, initial=float(data.get("interval", config.conf["lion"]["interval"])),
+			inc=0.1, style=wx.SP_ARROW_KEYS)
+		self.spinInterval.SetDigits(1)
+		timingGrid.Add(self.spinInterval, 1, wx.ALL | wx.EXPAND, 5)
 
 		timingSbSizer.Add(timingGrid, 1, wx.EXPAND | wx.ALL, 5)
 		mainSizer.Add(timingSbSizer, 0, wx.ALL | wx.EXPAND, 5)
@@ -121,30 +127,14 @@ class frmMain(wx.Frame):
 		return target_value
 	
 	def _validateInputs(self):
-		"""Validate threshold and interval inputs. Returns (threshold, interval) or (None, None) with error message."""
-		try:
-			threshold = float(self.txtThreshold.GetValue())
-			interval = float(self.txtInterval.GetValue())
-			
-			# Validate threshold (0-1)
-			if threshold < 0.0 or threshold > 1.0:
-				ui.message(_("Threshold must be between 0 and 1"))
-				return None, None
-			
-			# Validate interval (> 0, use safe minimum)
-			if interval < 0.1:
-				ui.message(_("Interval must be at least 0.1 seconds"))
-				return None, None
-			
-			return threshold, interval
-		except ValueError:
-			ui.message(_("Invalid numeric value"))
-			return None, None
+		"""Get threshold and interval values from spin controls (already validated by range)."""
+		threshold = self.spinThreshold.GetValue()
+		interval = self.spinInterval.GetValue()
+		# SpinCtrlDouble already enforces min/max, so no additional validation needed
+		return threshold, interval
 
 	def btnOk_click(self, event):
 		threshold, interval = self._validateInputs()
-		if threshold is None:
-			return
 
 		config.conf["lion"]["threshold"] = threshold
 		config.conf["lion"]["interval"] = interval
@@ -163,8 +153,6 @@ class frmMain(wx.Frame):
 
 	def onSaveProfile(self, event):
 		threshold, interval = self._validateInputs()
-		if threshold is None:
-			return
 		
 		appName = self.backend.currentAppProfile
 		data = {
@@ -190,8 +178,8 @@ class frmMain(wx.Frame):
 		self.spinCropRight.SetValue(int(config.conf["lion"]["cropRight"]))
 		self.spinCropUp.SetValue(int(config.conf["lion"]["cropUp"]))
 		self.spinCropDown.SetValue(int(config.conf["lion"]["cropDown"]))
-		self.txtThreshold.SetValue(str(config.conf["lion"]["threshold"]))
-		self.txtInterval.SetValue(str(config.conf["lion"]["interval"]))
+		self.spinThreshold.SetValue(float(config.conf["lion"]["threshold"]))
+		self.spinInterval.SetValue(float(config.conf["lion"]["interval"]))
 		# Use robust target parsing with fallback
 		target_value = self._getSafeTargetSelection(config.conf["lion"]["target"])
 		self.choiceTarget.SetSelection(target_value)
