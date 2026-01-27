@@ -385,8 +385,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		
 		# Thread-safe state access
 		with self._stateLock:
-			# Get previous string for this key
-			state = self._ocrState.get(key, {"prevString": ""})
+			# Get or create state for this key
+			state = self._ocrState.setdefault(key, {"prevString": ""})
 			prevString = state["prevString"]
 			
 			# Compute similarity ratio
@@ -397,7 +397,6 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 				ui.message(info.text)
 				# Update state for this key
 				state["prevString"] = info.text
-				self._ocrState[key] = state
 
 	__gestures={
 		"kb:nvda+alt+l":"ReadLiveOcr",
