@@ -262,13 +262,13 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		try:
 			targetIndex = int(cfg.get("target", config.conf["lion"]["target"]))
 		except (ValueError, TypeError, KeyError):
-			targetIndex = config.conf["lion"]["target"]
+			targetIndex = int(config.conf["lion"]["target"])
 		
 		# Get configured threshold for this app
 		try:
 			configuredThreshold = float(cfg.get("threshold", config.conf["lion"]["threshold"]))
 		except (ValueError, TypeError, KeyError):
-			configuredThreshold = config.conf["lion"]["threshold"]
+			configuredThreshold = float(config.conf["lion"]["threshold"])
 		
 		key = (appName, targetIndex)
 		
