@@ -28,10 +28,6 @@ import globalVars
 addonHandler.initTranslation()
 active=False
 
-prevString=""
-counter=0
-recog = contentRecog.uwpOcr.UwpOcr()
-
 ADDON_NAME = "LionEvolutionPro"
 PROFILES_DIR = os.path.join(globalVars.appArgs.configPath, "addons", ADDON_NAME, "profiles")
 
@@ -70,6 +66,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 	
 	def __init__(self):
 		super(GlobalPlugin, self).__init__()
+		self._stateLock = threading.Lock()
+		self._ocrState = {}
 		self.createMenu()
 	
 	def getProfilePath(self, appName):
@@ -199,6 +197,13 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			if newAppName != self.currentAppProfile and newAppName != "nvda":
 				self.loadProfileForApp(newAppName)
 				
+				# Clear anti-repeat state for the new app to avoid stale suppression
+				with self._stateLock:
+					# Remove all keys for this app (all targets)
+					keys_to_remove = [k for k in self._ocrState.keys() if k[0] == newAppName]
+					for k in keys_to_remove:
+						del self._ocrState[k]
+				
 		nextHandler()
 
 	def cropRectLTWH(self, r, useSpotlight=False):
@@ -249,19 +254,37 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			time.sleep(config.conf["lion"]["interval"])
 
 	def OcrScreen(self):
+		# Snapshot scan context for consistent state during callback
+		appName = self.currentAppProfile
 		
-		global recog
+		# Determine targetIndex with per-app profile fallback
+		cfg = self.currentProfileData if self.currentProfileData else config.conf["lion"]
+		try:
+			targetIndex = int(cfg.get("target", config.conf["lion"]["target"]))
+		except (ValueError, TypeError, KeyError):
+			targetIndex = config.conf["lion"]["target"]
 		
+		# Get configured threshold for this app
+		try:
+			configuredThreshold = float(cfg.get("threshold", config.conf["lion"]["threshold"]))
+		except (ValueError, TypeError, KeyError):
+			configuredThreshold = config.conf["lion"]["threshold"]
 		
-
-		left,top, width,height=self.targets[config.conf["lion"]["target"]]
+		key = (appName, targetIndex)
+		
+		left, top, width, height = self.targets[targetIndex]
 		
 		recog = contentRecog.uwpOcr.UwpOcr()
 
 		imgInfo = contentRecog.RecogImageInfo.createFromRecognizer(left, top, width, height, recog)
 		sb = screenBitmap.ScreenBitmap(imgInfo.recogWidth, imgInfo.recogHeight) 
-		pixels = sb.captureImage(left, top, width, height) 
-		recog.recognize(pixels, imgInfo, recog_onResult)
+		pixels = sb.captureImage(left, top, width, height)
+		
+		# Pass key and threshold to callback via closure
+		def callback(result):
+			self._handleOcrResult(result, key, configuredThreshold)
+		
+		recog.recognize(pixels, imgInfo, callback)
 	
 	def script_SetStartMarker(self, gesture):
 		logHandler.log.info("LION: script_SetStartMarker triggered")
@@ -348,6 +371,33 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		except Exception as e:
 			logHandler.log.error(f"Spotlight OCR failed: {e}")
 			ui.message(_("OCR error"))
+	
+	def _handleOcrResult(self, result, key, configuredThreshold):
+		"""Handle OCR result with per-key anti-repeat state.
+		
+		Args:
+			result: OCR result object
+			key: (appName, targetIndex) tuple for state tracking
+			configuredThreshold: similarity threshold for this scan
+		"""
+		o = type('NVDAObjects.NVDAObject', (), {})()
+		info = result.makeTextInfo(o, textInfos.POSITION_ALL)
+		
+		# Thread-safe state access
+		with self._stateLock:
+			# Get previous string for this key
+			state = self._ocrState.get(key, {"prevString": ""})
+			prevString = state["prevString"]
+			
+			# Compute similarity ratio
+			ratio = SequenceMatcher(None, prevString, info.text).ratio()
+			
+			# Speak only if sufficiently different and valid
+			if ratio < configuredThreshold and info.text != "" and info.text != "Play":
+				ui.message(info.text)
+				# Update state for this key
+				state["prevString"] = info.text
+				self._ocrState[key] = state
 
 	__gestures={
 		"kb:nvda+alt+l":"ReadLiveOcr",
@@ -355,19 +405,3 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		"kb:nvda+shift+2": "SetEndMarker",
 		"kb:nvda+shift+l": "ScanSpotlight"
 	}
-	
-def recog_onResult(result):
-	global prevString
-	global recog
-	global counter
-	counter+=1
-	o=type('NVDAObjects.NVDAObject', (), {})()
-	info=result.makeTextInfo(o, textInfos.POSITION_ALL)
-	threshold=SequenceMatcher(None, prevString, info.text).ratio()
-	if threshold<config.conf['lion']['threshold'] and info.text!="" and info.text!="Play":
-		ui.message(info.text)
-		prevString=info.text
-
-	if counter>9:
-		del recog
-		counter=0
