@@ -243,7 +243,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 	def ocrLoop(self):
 		cfg=config.conf["lion" ]
 		
-		# Initialize targets once
+		# Initialize targets for first scan
 		self.rebuildTargets()
 		
 		global active

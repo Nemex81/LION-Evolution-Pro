@@ -126,11 +126,11 @@ class frmMain(wx.Frame):
 			"cropDown": int(self.spinCropDown.GetValue()),
 			"threshold": float(self.txtThreshold.GetValue()),
 			"interval": float(self.txtInterval.GetValue()),
-			# Include spotlight settings from current profile data
-			"spotlight_cropLeft": int(self.backend.currentProfileData.get("spotlight_cropLeft", 0)),
-			"spotlight_cropRight": int(self.backend.currentProfileData.get("spotlight_cropRight", 0)),
-			"spotlight_cropUp": int(self.backend.currentProfileData.get("spotlight_cropUp", 0)),
-			"spotlight_cropDown": int(self.backend.currentProfileData.get("spotlight_cropDown", 0))
+			# Include spotlight settings from current profile data, with null safety
+			"spotlight_cropLeft": int(self.backend.currentProfileData.get("spotlight_cropLeft", 0)) if self.backend.currentProfileData else 0,
+			"spotlight_cropRight": int(self.backend.currentProfileData.get("spotlight_cropRight", 0)) if self.backend.currentProfileData else 0,
+			"spotlight_cropUp": int(self.backend.currentProfileData.get("spotlight_cropUp", 0)) if self.backend.currentProfileData else 0,
+			"spotlight_cropDown": int(self.backend.currentProfileData.get("spotlight_cropDown", 0)) if self.backend.currentProfileData else 0
 		}
 		self.backend.saveProfileForApp(appName, data)
 		self.lblActiveProfile.SetLabel(_("Active Profile: ") + appName)
