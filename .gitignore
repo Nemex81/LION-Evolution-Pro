@@ -1,0 +1,7 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# NVDA addon build artifacts
+*.nvda-addon
