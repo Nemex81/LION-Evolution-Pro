@@ -230,23 +230,32 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		
 		return locationHelper.RectLTWH(newX, newY, newWidth, newHeight)
 	
-	def ocrLoop(self):
-		cfg=config.conf["lion" ]
-		
+	def rebuildTargets(self):
+		"""Rebuild OCR targets based on current profile settings.
+		This allows changes to crop/target/profile to take effect without restarting OCR."""
 		self.targets={
 			0:api.getNavigatorObject().location,
-			#1:locationHelper.RectLTRB(int(cfg["cropLeft"]*self.resX/100.0), int(cfg["cropUp"]*self.resY/100.0), int(self.resX-cfg["cropRight"]*self.resX/100.0), int(self.resY-cfg["cropDown"]*self.resY/100.0)).toLTWH(),
 			1:self.cropRectLTWH(locationHelper.RectLTWH(0,0, self.resX, self.resY)),
 			2:self.cropRectLTWH(api.getForegroundObject().location),
 			3:api.getFocusObject().location
 		}
-		#print( self.targets)
+	
+	def ocrLoop(self):
+		cfg=config.conf["lion" ]
+		
+		# Initialize targets once
+		self.rebuildTargets()
+		
 		global active
 
 
 		while(active==True ):
+			# Rebuild targets before each scan to pick up changes
+			self.rebuildTargets()
 			self.OcrScreen()
-			time.sleep(config.conf["lion"]["interval"])
+			# Use current profile's interval
+			interval = self.currentProfileData.get("interval", config.conf["lion"]["interval"]) if self.currentProfileData else config.conf["lion"]["interval"]
+			time.sleep(interval)
 
 	def OcrScreen(self):
 		
@@ -261,7 +270,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		imgInfo = contentRecog.RecogImageInfo.createFromRecognizer(left, top, width, height, recog)
 		sb = screenBitmap.ScreenBitmap(imgInfo.recogWidth, imgInfo.recogHeight) 
 		pixels = sb.captureImage(left, top, width, height) 
-		recog.recognize(pixels, imgInfo, recog_onResult)
+		recog.recognize(pixels, imgInfo, self._recog_onResult)
 	
 	def script_SetStartMarker(self, gesture):
 		logHandler.log.info("LION: script_SetStartMarker triggered")
@@ -349,25 +358,30 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			logHandler.log.error(f"Spotlight OCR failed: {e}")
 			ui.message(_("OCR error"))
 
+	def _recog_onResult(self, result):
+		"""Instance method for OCR result callback. Uses per-app threshold when available."""
+		global prevString
+		global recog
+		global counter
+		counter+=1
+		o=type('NVDAObjects.NVDAObject', (), {})()
+		info=result.makeTextInfo(o, textInfos.POSITION_ALL)
+		
+		# Use per-app threshold if available, otherwise fallback to global
+		configuredThreshold = self.currentProfileData.get("threshold", config.conf['lion']['threshold']) if self.currentProfileData else config.conf['lion']['threshold']
+		
+		threshold=SequenceMatcher(None, prevString, info.text).ratio()
+		if threshold<configuredThreshold and info.text!="" and info.text!="Play":
+			ui.message(info.text)
+			prevString=info.text
+
+		if counter>9:
+			del recog
+			counter=0
+
 	__gestures={
 		"kb:nvda+alt+l":"ReadLiveOcr",
 		"kb:nvda+shift+1": "SetStartMarker",
 		"kb:nvda+shift+2": "SetEndMarker",
 		"kb:nvda+shift+l": "ScanSpotlight"
 	}
-	
-def recog_onResult(result):
-	global prevString
-	global recog
-	global counter
-	counter+=1
-	o=type('NVDAObjects.NVDAObject', (), {})()
-	info=result.makeTextInfo(o, textInfos.POSITION_ALL)
-	threshold=SequenceMatcher(None, prevString, info.text).ratio()
-	if threshold<config.conf['lion']['threshold'] and info.text!="" and info.text!="Play":
-		ui.message(info.text)
-		prevString=info.text
-
-	if counter>9:
-		del recog
-		counter=0
