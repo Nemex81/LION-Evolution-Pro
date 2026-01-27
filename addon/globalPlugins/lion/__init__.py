@@ -85,6 +85,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			"spotlight_cropRight": config.conf["lion"]["spotlight_cropRight"],
 			"spotlight_cropUp": config.conf["lion"]["spotlight_cropUp"],
 			"spotlight_cropDown": config.conf["lion"]["spotlight_cropDown"],
+			"target": config.conf["lion"]["target"],
 			"threshold": config.conf["lion"]["threshold"],
 			"interval": config.conf["lion"]["interval"]
 		}
@@ -112,6 +113,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			"spotlight_cropRight": config.conf["lion"]["spotlight_cropRight"],
 			"spotlight_cropUp": config.conf["lion"]["spotlight_cropUp"],
 			"spotlight_cropDown": config.conf["lion"]["spotlight_cropDown"],
+			"target": config.conf["lion"]["target"],
 			"threshold": config.conf["lion"]["threshold"],
 			"interval": config.conf["lion"]["interval"]
 		}
@@ -235,23 +237,29 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		
 		return locationHelper.RectLTWH(newX, newY, newWidth, newHeight)
 	
-	def ocrLoop(self):
-		cfg=config.conf["lion" ]
-		
-		self.targets={
-			0:api.getNavigatorObject().location,
-			#1:locationHelper.RectLTRB(int(cfg["cropLeft"]*self.resX/100.0), int(cfg["cropUp"]*self.resY/100.0), int(self.resX-cfg["cropRight"]*self.resX/100.0), int(self.resY-cfg["cropDown"]*self.resY/100.0)).toLTWH(),
-			1:self.cropRectLTWH(locationHelper.RectLTWH(0,0, self.resX, self.resY)),
-			2:self.cropRectLTWH(api.getForegroundObject().location),
-			3:api.getFocusObject().location
+	def rebuildTargets(self):
+		"""Rebuild targets dict using current profile settings."""
+		self.targets = {
+			0: api.getNavigatorObject().location,
+			1: self.cropRectLTWH(locationHelper.RectLTWH(0, 0, self.resX, self.resY)),
+			2: self.cropRectLTWH(api.getForegroundObject().location),
+			3: api.getFocusObject().location
 		}
-		#print( self.targets)
+	
+	def ocrLoop(self):
 		global active
-
+		
+		# Build targets initially
+		self.rebuildTargets()
 
 		while(active==True ):
+			# Rebuild targets before each scan to pick up dynamic changes
+			self.rebuildTargets()
 			self.OcrScreen()
-			time.sleep(config.conf["lion"]["interval"])
+			
+			# Use per-app interval with fallback to global
+			interval = self.currentProfileData.get("interval", config.conf["lion"]["interval"]) if self.currentProfileData else config.conf["lion"]["interval"]
+			time.sleep(interval)
 
 	def OcrScreen(self):
 		# Snapshot scan context for consistent state during callback
@@ -383,7 +391,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		o = type('NVDAObjects.NVDAObject', (), {})()
 		info = result.makeTextInfo(o, textInfos.POSITION_ALL)
 		
-		# Thread-safe state access
+		# Thread-safe state access - compute decision under lock
+		shouldSpeak = False
 		with self._stateLock:
 			# Get or create state for this key
 			state = self._ocrState.setdefault(key, {"prevString": ""})
@@ -392,11 +401,15 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			# Compute similarity ratio
 			ratio = SequenceMatcher(None, prevString, info.text).ratio()
 			
-			# Speak only if sufficiently different and valid
+			# Determine if we should speak
 			if ratio < configuredThreshold and info.text != "" and info.text != "Play":
-				ui.message(info.text)
+				shouldSpeak = True
 				# Update state for this key
 				state["prevString"] = info.text
+		
+		# Speak outside of lock to avoid blocking
+		if shouldSpeak:
+			ui.message(info.text)
 
 	__gestures={
 		"kb:nvda+alt+l":"ReadLiveOcr",

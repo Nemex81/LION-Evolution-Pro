@@ -44,7 +44,7 @@ class frmMain(wx.Frame):
 			_("Current window"),
 			_("Current control")
 		])
-		self.choiceTarget.SetSelection(int(config.conf["lion"]["target"]))
+		self.choiceTarget.SetSelection(int(data.get("target", config.conf["lion"]["target"])))
 		targetSizer.Add(self.choiceTarget, 0, wx.ALL | wx.EXPAND, 5)
 		mainSizer.Add(targetSizer, 0, wx.ALL | wx.EXPAND, 5)
 
@@ -56,12 +56,14 @@ class frmMain(wx.Frame):
 		timingGrid.AddGrowableCol(1, 1)
 
 		timingGrid.Add(wx.StaticText(timingBox, label=_("Threshold (0-1)")), 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
-		self.txtThreshold = wx.TextCtrl(timingBox, value=str(data.get("threshold", config.conf["lion"]["threshold"])))
-		timingGrid.Add(self.txtThreshold, 1, wx.ALL | wx.EXPAND, 5)
+		self.spinThreshold = wx.SpinCtrlDouble(timingBox, min=0.0, max=1.0, inc=0.05, initial=float(data.get("threshold", config.conf["lion"]["threshold"])))
+		self.spinThreshold.SetDigits(2)
+		timingGrid.Add(self.spinThreshold, 1, wx.ALL | wx.EXPAND, 5)
 
 		timingGrid.Add(wx.StaticText(timingBox, label=_("Interval (seconds)")), 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
-		self.txtInterval = wx.TextCtrl(timingBox, value=str(data.get("interval", config.conf["lion"]["interval"])))
-		timingGrid.Add(self.txtInterval, 1, wx.ALL | wx.EXPAND, 5)
+		self.spinInterval = wx.SpinCtrlDouble(timingBox, min=0.0, max=10.0, inc=0.1, initial=float(data.get("interval", config.conf["lion"]["interval"])))
+		self.spinInterval.SetDigits(1)
+		timingGrid.Add(self.spinInterval, 1, wx.ALL | wx.EXPAND, 5)
 
 		timingSbSizer.Add(timingGrid, 1, wx.EXPAND | wx.ALL, 5)
 		mainSizer.Add(timingSbSizer, 0, wx.ALL | wx.EXPAND, 5)
@@ -97,20 +99,15 @@ class frmMain(wx.Frame):
 		return spin
 
 	def btnOk_click(self, event):
-		try:
-			config.conf["lion"]["threshold"] = float(self.txtThreshold.GetValue())
-			config.conf["lion"]["interval"] = float(self.txtInterval.GetValue())
-		except ValueError:
-			ui.message(_("Invalid numeric value"))
-			return
-
+		config.conf["lion"]["threshold"] = self.spinThreshold.GetValue()
+		config.conf["lion"]["interval"] = self.spinInterval.GetValue()
 		config.conf["lion"]["target"] = self.choiceTarget.GetSelection()
 		config.conf["lion"]["cropLeft"] = int(self.spinCropLeft.GetValue())
 		config.conf["lion"]["cropRight"] = int(self.spinCropRight.GetValue())
 		config.conf["lion"]["cropUp"] = int(self.spinCropUp.GetValue())
 		config.conf["lion"]["cropDown"] = int(self.spinCropDown.GetValue())
 
-		ui.message(_("settings saved"))
+		ui.message(_("Global settings saved"))
 		self.Close()  # triggers onClose
 
 	def btnCancel_click(self, event):
@@ -124,12 +121,20 @@ class frmMain(wx.Frame):
 			"cropRight": int(self.spinCropRight.GetValue()),
 			"cropUp": int(self.spinCropUp.GetValue()),
 			"cropDown": int(self.spinCropDown.GetValue()),
-			"threshold": float(self.txtThreshold.GetValue()),
-			"interval": float(self.txtInterval.GetValue())
+			"target": self.choiceTarget.GetSelection(),
+			"threshold": self.spinThreshold.GetValue(),
+			"interval": self.spinInterval.GetValue()
 		}
+		
+		# Include spotlight values from backend if they exist
+		if self.backend.currentProfileData:
+			for key in ["spotlight_cropLeft", "spotlight_cropRight", "spotlight_cropUp", "spotlight_cropDown"]:
+				if key in self.backend.currentProfileData:
+					data[key] = self.backend.currentProfileData[key]
+		
 		self.backend.saveProfileForApp(appName, data)
 		self.lblActiveProfile.SetLabel(_("Active Profile: ") + appName)
-		ui.message(_("profile saved"))
+		ui.message(_("Per-app profile saved"))
 
 	def onResetProfile(self, event):
 		appName = self.backend.currentAppProfile
@@ -140,9 +145,10 @@ class frmMain(wx.Frame):
 		self.spinCropRight.SetValue(int(config.conf["lion"]["cropRight"]))
 		self.spinCropUp.SetValue(int(config.conf["lion"]["cropUp"]))
 		self.spinCropDown.SetValue(int(config.conf["lion"]["cropDown"]))
-		self.txtThreshold.SetValue(str(config.conf["lion"]["threshold"]))
-		self.txtInterval.SetValue(str(config.conf["lion"]["interval"]))
-		ui.message(_("profile reset"))
+		self.choiceTarget.SetSelection(int(config.conf["lion"]["target"]))
+		self.spinThreshold.SetValue(float(config.conf["lion"]["threshold"]))
+		self.spinInterval.SetValue(float(config.conf["lion"]["interval"]))
+		ui.message(_("Profile reset to global settings"))
 
 	def onClose(self, event):
 		self.backend.settingsDialog = None
