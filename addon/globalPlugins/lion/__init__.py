@@ -68,6 +68,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		super(GlobalPlugin, self).__init__()
 		self._stateLock = threading.Lock()
 		self._ocrState = {}
+		self._profileLock = threading.Lock()
 		self.createMenu()
 	
 	def getProfilePath(self, appName):
@@ -193,11 +194,15 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			ui.message(("lion stopped"))
 			
 	def event_gainFocus(self, obj, nextHandler):
-		if hasattr(obj, "appModule"):
-			newAppName = obj.appModule.appName
+		try:
+			# Safe access to appModule and appName
+			appMod = getattr(obj, "appModule", None)
+			newAppName = getattr(appMod, "appName", None) if appMod else None
 			
-			if newAppName != self.currentAppProfile and newAppName != "nvda":
-				self.loadProfileForApp(newAppName)
+			if newAppName and newAppName != self.currentAppProfile and newAppName != "nvda":
+				# Thread-safe profile loading
+				with self._profileLock:
+					self.loadProfileForApp(newAppName)
 				
 				# Clear anti-repeat state for the new app to avoid stale suppression
 				with self._stateLock:
@@ -205,8 +210,12 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 					keys_to_remove = [k for k in self._ocrState.keys() if k[0] == newAppName]
 					for k in keys_to_remove:
 						del self._ocrState[k]
-				
-		nextHandler()
+		except Exception:
+			# Never crash NVDA on focus events
+			logHandler.log.exception(f"{ADDON_NAME}: event_gainFocus failed")
+		finally:
+			# Always call nextHandler
+			nextHandler()
 
 	def cropRectLTWH(self, r, useSpotlight=False):
 		cfg = self.currentProfileData if self.currentProfileData else config.conf["lion"]
@@ -237,14 +246,38 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		
 		return locationHelper.RectLTWH(newX, newY, newWidth, newHeight)
 	
+	def _safeLocation(self, obj, fallbackRect):
+		"""Safely get location from object, returning fallback if unavailable."""
+		if obj is None:
+			return fallbackRect
+		location = getattr(obj, "location", None)
+		if location is None:
+			return fallbackRect
+		return location
+	
 	def rebuildTargets(self):
 		"""Rebuild targets dict using current profile settings."""
-		self.targets = {
-			0: api.getNavigatorObject().location,
-			1: self.cropRectLTWH(locationHelper.RectLTWH(0, 0, self.resX, self.resY)),
-			2: self.cropRectLTWH(api.getForegroundObject().location),
-			3: api.getFocusObject().location
-		}
+		try:
+			# Safe fallback: whole screen rect
+			screenRect = self.cropRectLTWH(locationHelper.RectLTWH(0, 0, self.resX, self.resY))
+			
+			self.targets = {
+				0: self._safeLocation(api.getNavigatorObject(), screenRect),
+				1: screenRect,
+				2: self._safeLocation(api.getForegroundObject(), screenRect),
+				3: self._safeLocation(api.getFocusObject(), screenRect)
+			}
+		except Exception:
+			# On any error, set all targets to safe screen rect
+			logHandler.log.exception(f"{ADDON_NAME}: rebuildTargets failed, using fallback")
+			try:
+				screenRect = locationHelper.RectLTWH(0, 0, self.resX, self.resY)
+				self.targets = {0: screenRect, 1: screenRect, 2: screenRect, 3: screenRect}
+			except Exception:
+				# Last resort: minimal valid rect
+				logHandler.log.exception(f"{ADDON_NAME}: rebuildTargets fallback also failed")
+				minRect = locationHelper.RectLTWH(0, 0, 1, 1)
+				self.targets = {0: minRect, 1: minRect, 2: minRect, 3: minRect}
 	
 	def ocrLoop(self):
 		global active
@@ -257,16 +290,19 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			self.rebuildTargets()
 			self.OcrScreen()
 			
-			# Use per-app interval with fallback to global
-			interval = self.currentProfileData.get("interval", config.conf["lion"]["interval"]) if self.currentProfileData else config.conf["lion"]["interval"]
+			# Use per-app interval with fallback to global (thread-safe)
+			with self._profileLock:
+				interval = self.currentProfileData.get("interval", config.conf["lion"]["interval"]) if self.currentProfileData else config.conf["lion"]["interval"]
 			time.sleep(interval)
 
 	def OcrScreen(self):
 		# Snapshot scan context for consistent state during callback
-		appName = self.currentAppProfile
+		# Thread-safe profile data access
+		with self._profileLock:
+			appName = self.currentAppProfile
+			cfg = dict(self.currentProfileData) if self.currentProfileData else dict(config.conf["lion"])
 		
 		# Determine targetIndex with per-app profile fallback
-		cfg = self.currentProfileData if self.currentProfileData else config.conf["lion"]
 		try:
 			targetIndex = int(cfg.get("target", config.conf["lion"]["target"]))
 		except (ValueError, TypeError, KeyError):
