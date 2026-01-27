@@ -88,7 +88,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			"spotlight_cropUp": config.conf["lion"]["spotlight_cropUp"],
 			"spotlight_cropDown": config.conf["lion"]["spotlight_cropDown"],
 			"threshold": config.conf["lion"]["threshold"],
-			"interval": config.conf["lion"]["interval"]
+			"interval": config.conf["lion"]["interval"],
+			"target": config.conf["lion"]["target"]
 		}
 		logHandler.log.info(f"{ADDON_NAME}: Loaded Global Profile")
 	
@@ -115,7 +116,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			"spotlight_cropUp": config.conf["lion"]["spotlight_cropUp"],
 			"spotlight_cropDown": config.conf["lion"]["spotlight_cropDown"],
 			"threshold": config.conf["lion"]["threshold"],
-			"interval": config.conf["lion"]["interval"]
+			"interval": config.conf["lion"]["interval"],
+			"target": config.conf["lion"]["target"]
 		}
 		self.currentAppProfile = appName
 		logHandler.log.info(f"{ADDON_NAME}: Loaded global defaults for new app context: {appName}")
@@ -262,8 +264,9 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		global recog
 		
 		
-
-		left,top, width,height=self.targets[config.conf["lion"]["target"]]
+		# Use per-app target if available, otherwise fallback to global
+		targetIndex = int(self.currentProfileData.get("target", config.conf["lion"]["target"])) if self.currentProfileData else config.conf["lion"]["target"]
+		left,top, width,height=self.targets[targetIndex]
 		
 		recog = contentRecog.uwpOcr.UwpOcr()
 

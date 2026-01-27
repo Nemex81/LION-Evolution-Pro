@@ -44,7 +44,7 @@ class frmMain(wx.Frame):
 			_("Current window"),
 			_("Current control")
 		])
-		self.choiceTarget.SetSelection(int(config.conf["lion"]["target"]))
+		self.choiceTarget.SetSelection(int(data.get("target", config.conf["lion"]["target"])))
 		targetSizer.Add(self.choiceTarget, 0, wx.ALL | wx.EXPAND, 5)
 		mainSizer.Add(targetSizer, 0, wx.ALL | wx.EXPAND, 5)
 
@@ -110,7 +110,7 @@ class frmMain(wx.Frame):
 		config.conf["lion"]["cropUp"] = int(self.spinCropUp.GetValue())
 		config.conf["lion"]["cropDown"] = int(self.spinCropDown.GetValue())
 
-		ui.message(_("settings saved"))
+		ui.message(_("Global settings saved"))
 		self.Close()  # triggers onClose
 
 	def btnCancel_click(self, event):
@@ -126,6 +126,7 @@ class frmMain(wx.Frame):
 			"cropDown": int(self.spinCropDown.GetValue()),
 			"threshold": float(self.txtThreshold.GetValue()),
 			"interval": float(self.txtInterval.GetValue()),
+			"target": int(self.choiceTarget.GetSelection()),
 			# Include spotlight settings from current profile data, with null safety
 			"spotlight_cropLeft": int(self.backend.currentProfileData.get("spotlight_cropLeft", 0)) if self.backend.currentProfileData else 0,
 			"spotlight_cropRight": int(self.backend.currentProfileData.get("spotlight_cropRight", 0)) if self.backend.currentProfileData else 0,
@@ -134,7 +135,7 @@ class frmMain(wx.Frame):
 		}
 		self.backend.saveProfileForApp(appName, data)
 		self.lblActiveProfile.SetLabel(_("Active Profile: ") + appName)
-		ui.message(_("profile saved"))
+		ui.message(_("Per-app profile saved"))
 
 	def onResetProfile(self, event):
 		appName = self.backend.currentAppProfile
@@ -147,6 +148,7 @@ class frmMain(wx.Frame):
 		self.spinCropDown.SetValue(int(config.conf["lion"]["cropDown"]))
 		self.txtThreshold.SetValue(str(config.conf["lion"]["threshold"]))
 		self.txtInterval.SetValue(str(config.conf["lion"]["interval"]))
+		self.choiceTarget.SetSelection(int(config.conf["lion"]["target"]))
 		ui.message(_("profile reset"))
 
 	def onClose(self, event):
