@@ -253,6 +253,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 
 		while(active==True ):
 			# Rebuild targets before each scan to pick up changes
+			# This allows dynamic updates when user changes crop/target/profile without restarting OCR
+			# Performance impact is minimal - just creates dict with 4 rect entries
 			self.rebuildTargets()
 			self.OcrScreen()
 			# Use current profile's interval
@@ -265,7 +267,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		
 		
 		# Use per-app target if available, otherwise fallback to global
-		targetIndex = int(self.currentProfileData.get("target", config.conf["lion"]["target"])) if self.currentProfileData else config.conf["lion"]["target"]
+		globalTarget = config.conf["lion"]["target"]
+		targetIndex = int(self.currentProfileData.get("target", globalTarget)) if self.currentProfileData else globalTarget
 		left,top, width,height=self.targets[targetIndex]
 		
 		recog = contentRecog.uwpOcr.UwpOcr()
