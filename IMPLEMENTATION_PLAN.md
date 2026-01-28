@@ -38,6 +38,60 @@ This document serves as the primary instruction manual and progress tracker for 
 
 ---
 
+## 🎯 Upstream Compatibility Refactor (Issue #11)
+*Phase 7: Maximize compatibility with upstream vortex1024/LION while retaining per-app profiles.*
+
+### Compatibility Contract
+
+**Global Settings Source of Truth:**
+- All global settings are stored in `config.conf["lion"]` using upstream-compatible keys
+- Upstream keys: `cropUp`, `cropLeft`, `cropRight`, `cropDown`, `target`, `threshold`, `interval`
+- Additional keys for spotlight: `spotlight_cropUp`, `spotlight_cropLeft`, `spotlight_cropRight`, `spotlight_cropDown`
+
+**Profile Override System:**
+- Profiles are JSON files in `PROFILES_DIR` storing **only override keys**
+- Missing keys in a profile fall back to global `config.conf["lion"]` values
+- If no profile exists for the current app, addon behaves exactly like upstream (globals only)
+
+**Behavior Contract:**
+- When `currentAppProfile = "global"`: Use only `config.conf["lion"]` values
+- When profile exists: Merge global config + profile overrides (profile takes precedence)
+- Focus switching triggers profile loading; anti-repeat state resets per app
+
+### Progress Checklist (Issue #11)
+
+- [x] **Commit 1: Documentation**
+  - [x] Update IMPLEMENTATION_PLAN.md with compatibility contract
+  - [x] Add progress checklist section for Issue #11
+
+- [ ] **Commit 2: Core Refactor (Backend)**
+  - [ ] Implement `getEffectiveConfig(appName)` merging global + overrides
+  - [ ] Modify `loadProfileForApp(appName)` to keep `currentAppProfile = "global"` when no profile exists
+  - [ ] Ensure `currentProfileData = {}` (empty) when no profile exists
+  - [ ] Update `ocrLoop()` to use effective config snapshot via `getEffectiveConfig()`
+  - [ ] Preserve all robustness features (locks, last-valid targets, spotlight)
+
+- [ ] **Commit 3: GUI Refactor**
+  - [ ] Replace single-page dialog with `wx.Notebook` (two tabs)
+  - [ ] Tab "General": Controls in upstream order (Interval → OCR Target → Threshold → Crop)
+  - [ ] Tab "Profiles": ListBox of profiles, Add/Delete/Set active buttons
+  - [ ] "OK" saves global settings only to `config.conf["lion"]`
+  - [ ] "Save Profile" saves overrides to JSON (only if profile active)
+  - [ ] Update profile label display
+
+- [ ] **Commit 4: Data Migration**
+  - [ ] Normalize legacy profile JSON: remove keys equal to global values
+  - [ ] Ensure spotlight keys fall back to global defaults if not in profile
+  - [ ] Optionally persist normalized profiles back to disk
+
+- [ ] **Commit 5: Polish & Manifest**
+  - [ ] Review user-facing strings and menu tooltips
+  - [ ] Update `addon/manifest.ini` author email
+  - [ ] Verify keyboard accessibility
+  - [ ] Add architecture documentation to docstrings
+
+---
+
 ## 🛠️ Detailed Technical Specifications
 
 ### Phase 1: Infrastructure & Setup
