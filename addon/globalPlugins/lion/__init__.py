@@ -69,6 +69,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		self._stateLock = threading.Lock()
 		self._ocrState = {}
 		self._profileLock = threading.Lock()
+		# Initialize to global profile (no overrides)
+		self.loadGlobalProfile()
 		# Initialize last-valid targets to CROPPED screen (not raw)
 		# Use default/global config for initial crop (safe copy)
 		defaultCfg = {k: config.conf["lion"][k] for k in config.conf["lion"]}
@@ -87,9 +89,17 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		safeName = "".join(x for x in appName if x.isalnum() or x in "-_")
 		return os.path.join(PROFILES_DIR, f"{safeName}.json")
 	
-	def loadGlobalProfile(self):
-		self.currentAppProfile = "global"
-		self.currentProfileData = {
+	def getEffectiveConfig(self, appName):
+		"""Get effective configuration by merging global config + per-app overrides.
+		
+		Args:
+			appName: Current application profile name or "global"
+		
+		Returns:
+			dict: Merged configuration (global base + profile overrides)
+		"""
+		# Start with global config as base
+		effective = {
 			"cropLeft": config.conf["lion"]["cropLeft"],
 			"cropRight": config.conf["lion"]["cropRight"],
 			"cropUp": config.conf["lion"]["cropUp"],
@@ -102,36 +112,42 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			"threshold": config.conf["lion"]["threshold"],
 			"interval": config.conf["lion"]["interval"]
 		}
-		logHandler.log.info(f"{ADDON_NAME}: Loaded Global Profile")
+		
+		# If not global and we have profile data, apply overrides
+		if appName != "global" and self.currentProfileData:
+			effective.update(self.currentProfileData)
+		
+		return effective
+	
+	def loadGlobalProfile(self):
+		"""Load global profile - resets to using config.conf["lion"] only."""
+		self.currentAppProfile = "global"
+		self.currentProfileData = {}
+		logHandler.log.info(f"{ADDON_NAME}: Loaded Global Profile (no overrides)")
 	
 	def loadProfileForApp(self, appName):
+		"""Load profile for specific app. If no profile exists, keeps currentAppProfile="global".
+		
+		Args:
+			appName: Application name to load profile for
+		"""
 		path = self.getProfilePath(appName)
 		if os.path.exists(path):
 			try:
 				with open(path, "r") as f:
-					self.currentProfileData = json.load(f)
+					profileData = json.load(f)
+				# Profile should contain only overrides
+				self.currentProfileData = profileData
 				self.currentAppProfile = appName
-				logHandler.log.info(f"{ADDON_NAME}: Loaded profile for {appName}")
+				logHandler.log.info(f"{ADDON_NAME}: Loaded profile overrides for {appName}")
 				return
 			except Exception as e:
 				logHandler.log.error(f"{ADDON_NAME}: Error loading {appName}: {e}")
 		
-		# Fallback: Load global defaults but set the CURRENT APP name so we can save it later
-		self.currentProfileData = {
-			"cropLeft": config.conf["lion"]["cropLeft"],
-			"cropRight": config.conf["lion"]["cropRight"],
-			"cropUp": config.conf["lion"]["cropUp"],
-			"cropDown": config.conf["lion"]["cropDown"],
-			"spotlight_cropLeft": config.conf["lion"]["spotlight_cropLeft"],
-			"spotlight_cropRight": config.conf["lion"]["spotlight_cropRight"],
-			"spotlight_cropUp": config.conf["lion"]["spotlight_cropUp"],
-			"spotlight_cropDown": config.conf["lion"]["spotlight_cropDown"],
-			"target": config.conf["lion"]["target"],
-			"threshold": config.conf["lion"]["threshold"],
-			"interval": config.conf["lion"]["interval"]
-		}
-		self.currentAppProfile = appName
-		logHandler.log.info(f"{ADDON_NAME}: Loaded global defaults for new app context: {appName}")
+		# No profile exists - fall back to global (upstream behavior)
+		self.currentAppProfile = "global"
+		self.currentProfileData = {}
+		logHandler.log.info(f"{ADDON_NAME}: No profile for {appName}, using global config")
 	
 	def saveProfileForApp(self, appName, data):
 		path = self.getProfilePath(appName)
@@ -319,10 +335,10 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		global active
 		
 		while(active==True ):
-			# Snapshot profile config once per scan (thread-safe)
+			# Snapshot effective config once per scan (thread-safe)
 			with self._profileLock:
-				cfg = dict(self.currentProfileData) if self.currentProfileData else dict(config.conf["lion"])
 				appName = self.currentAppProfile
+				cfg = self.getEffectiveConfig(appName)
 			
 			# Rebuild targets with this config snapshot
 			targets = self.rebuildTargets(cfg)
@@ -419,17 +435,32 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		pRight = int(((screenWidth - right) / screenWidth) * 100)
 		pDown = int(((screenHeight - bottom) / screenHeight) * 100)
 		
-		# Update current profile data
+		# Update current profile data (spotlight overrides)
+		# Ensure we have a profile data dict to modify
 		if not self.currentProfileData:
-			self.currentProfileData = config.conf["lion"]
+			self.currentProfileData = {}
 			
 		self.currentProfileData["spotlight_cropLeft"] = pLeft
 		self.currentProfileData["spotlight_cropRight"] = pRight
 		self.currentProfileData["spotlight_cropUp"] = pUp
 		self.currentProfileData["spotlight_cropDown"] = pDown
 		
+		# If we're in global mode, we need to get the current app to save a profile
+		with self._profileLock:
+			appName = self.currentAppProfile
+			# If still global, try to get current foreground app
+			if appName == "global":
+				try:
+					fgObj = api.getForegroundObject()
+					if hasattr(fgObj, "appModule") and hasattr(fgObj.appModule, "appName"):
+						appName = fgObj.appModule.appName
+						self.currentAppProfile = appName
+				except:
+					pass
+		
 		# Save immediately to persist
-		self.saveProfileForApp(self.currentAppProfile, self.currentProfileData)
+		if appName != "global":
+			self.saveProfileForApp(appName, self.currentProfileData)
 		
 		ui.message(_("Spotlight zone saved"))
 		self.spotlightStartPoint = None
@@ -444,7 +475,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		
 		# Get current profile config for spotlight crop
 		with self._profileLock:
-			cfg = dict(self.currentProfileData) if self.currentProfileData else dict(config.conf["lion"])
+			appName = self.currentAppProfile
+			cfg = self.getEffectiveConfig(appName)
 		
 		r = locationHelper.RectLTWH(0, 0, self.resX, self.resY)
 		rect = self.cropRectLTWH(r, cfg, useSpotlight=True)
