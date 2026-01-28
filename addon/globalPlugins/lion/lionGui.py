@@ -262,12 +262,6 @@ class frmMain(wx.Frame):
 			if value != config.conf["lion"][key]:
 				overrides[key] = value
 		
-		# Include spotlight values from backend if they exist in current profile
-		if self.backend.currentProfileData:
-			for key in ["spotlight_cropLeft", "spotlight_cropRight", "spotlight_cropUp", "spotlight_cropDown"]:
-				if key in self.backend.currentProfileData:
-					overrides[key] = self.backend.currentProfileData[key]
-		
 		self.backend.saveProfileForApp(appName, overrides)
 		ui.message(_("Profile saved for ") + appName + _(" (overrides only)"))
 

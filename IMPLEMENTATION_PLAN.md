@@ -5,6 +5,8 @@ This document serves as the primary instruction manual and progress tracker for 
 **Target Repository:** `Nemex81/LION-Evolution-Pro`
 **Objective:** Implement application-specific profiles for OCR settings (dynamic loading based on active window focus).
 
+**Note:** Spotlight feature has been removed to simplify the addon to a single rectangle management system using main crop settings only.
+
 ---
 
 ## 📋 Progress Tracking (Agent Checklist)
@@ -46,7 +48,6 @@ This document serves as the primary instruction manual and progress tracker for 
 **Global Settings Source of Truth:**
 - All global settings are stored in `config.conf["lion"]` using upstream-compatible keys
 - Upstream keys: `cropUp`, `cropLeft`, `cropRight`, `cropDown`, `target`, `threshold`, `interval`
-- Additional keys for spotlight: `spotlight_cropUp`, `spotlight_cropLeft`, `spotlight_cropRight`, `spotlight_cropDown`
 
 **Profile Override System:**
 - Profiles are JSON files in `PROFILES_DIR` storing **only override keys**
