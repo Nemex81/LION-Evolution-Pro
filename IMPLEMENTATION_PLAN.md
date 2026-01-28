@@ -79,10 +79,10 @@ This document serves as the primary instruction manual and progress tracker for 
   - [x] "Save Profile" saves overrides to JSON (only if profile active)
   - [x] Update profile label display
 
-- [ ] **Commit 4: Data Migration**
-  - [ ] Normalize legacy profile JSON: remove keys equal to global values
-  - [ ] Ensure spotlight keys fall back to global defaults if not in profile
-  - [ ] Optionally persist normalized profiles back to disk
+- [x] **Commit 4: Data Migration**
+  - [x] Normalize legacy profile JSON: remove keys equal to global values
+  - [x] Ensure spotlight keys fall back to global defaults if not in profile
+  - [x] Optionally persist normalized profiles back to disk
 
 - [ ] **Commit 5: Polish & Manifest**
   - [ ] Review user-facing strings and menu tooltips

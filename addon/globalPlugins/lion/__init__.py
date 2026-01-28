@@ -125,6 +125,41 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		self.currentProfileData = {}
 		logHandler.log.info(f"{ADDON_NAME}: Loaded Global Profile (no overrides)")
 	
+	def _normalizeProfileToOverrides(self, profileData):
+		"""Normalize profile data to contain only overrides (values that differ from global).
+		
+		This is a migration helper for legacy profiles that stored full config.
+		
+		Args:
+			profileData: Raw profile data dict from JSON
+			
+		Returns:
+			dict: Normalized profile data with only overrides
+		"""
+		overrides = {}
+		
+		# Define keys that should be checked against global config
+		standardKeys = ["cropLeft", "cropRight", "cropUp", "cropDown", "target", "threshold", "interval"]
+		
+		for key in standardKeys:
+			if key in profileData:
+				# Only keep if different from global
+				if profileData[key] != config.conf["lion"][key]:
+					overrides[key] = profileData[key]
+		
+		# Spotlight keys: always keep if present (they are inherently overrides)
+		spotlightKeys = ["spotlight_cropLeft", "spotlight_cropRight", "spotlight_cropUp", "spotlight_cropDown"]
+		for key in spotlightKeys:
+			if key in profileData:
+				# Check if it differs from global spotlight defaults
+				if key in config.conf["lion"] and profileData[key] != config.conf["lion"][key]:
+					overrides[key] = profileData[key]
+				elif key not in config.conf["lion"]:
+					# If spotlight key doesn't exist in global, keep it as override
+					overrides[key] = profileData[key]
+		
+		return overrides
+	
 	def loadProfileForApp(self, appName):
 		"""Load profile for specific app. If no profile exists, keeps currentAppProfile="global".
 		
@@ -135,8 +170,33 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		if os.path.exists(path):
 			try:
 				with open(path, "r") as f:
-					profileData = json.load(f)
-				# Profile should contain only overrides
+					rawProfileData = json.load(f)
+				
+				# Migrate/normalize: convert full config to overrides-only
+				profileData = self._normalizeProfileToOverrides(rawProfileData)
+				
+				# If normalized profile is empty (all values matched global), treat as no profile
+				if not profileData:
+					logHandler.log.info(f"{ADDON_NAME}: Profile for {appName} is now empty after normalization (all values match global)")
+					self.currentAppProfile = "global"
+					self.currentProfileData = {}
+					# Optionally delete the empty profile file
+					try:
+						os.remove(path)
+						logHandler.log.info(f"{ADDON_NAME}: Removed empty profile file for {appName}")
+					except:
+						pass
+					return
+				
+				# Save normalized profile back to disk (migration)
+				if profileData != rawProfileData:
+					try:
+						with open(path, "w", encoding="utf-8") as f:
+							json.dump(profileData, f, indent=2)
+						logHandler.log.info(f"{ADDON_NAME}: Migrated profile for {appName} to override-only format")
+					except Exception as e:
+						logHandler.log.error(f"{ADDON_NAME}: Failed to migrate profile for {appName}: {e}")
+				
 				self.currentProfileData = profileData
 				self.currentAppProfile = appName
 				logHandler.log.info(f"{ADDON_NAME}: Loaded profile overrides for {appName}")
@@ -150,13 +210,19 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		logHandler.log.info(f"{ADDON_NAME}: No profile for {appName}, using global config")
 	
 	def saveProfileForApp(self, appName, data):
+		"""Save profile for specific app. Profiles store only overrides.
+		
+		Args:
+			appName: Application name
+			data: Profile data dict (should contain only overrides)
+		"""
 		path = self.getProfilePath(appName)
 		try:
 			with open(path, "w", encoding="utf-8") as f:
-				json.dump(data, f)
+				json.dump(data, f, indent=2)
 			self.currentAppProfile = appName
 			self.currentProfileData = data
-			logHandler.log.info(f"{ADDON_NAME}: Saved profile for {appName}")
+			logHandler.log.info(f"{ADDON_NAME}: Saved profile for {appName} (overrides only)")
 		except Exception as e:
 			logHandler.log.error(f"{ADDON_NAME}: Error saving profile for {appName}: {e}")
 	
