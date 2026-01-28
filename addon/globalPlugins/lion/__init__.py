@@ -70,15 +70,18 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		self._ocrState = {}
 		self._profileLock = threading.Lock()
 		# Initialize last-valid targets to CROPPED screen (not raw)
-		# Use default/global config for initial crop
-		defaultCfg = dict(config.conf["lion"])
+		# Use default/global config for initial crop (safe copy)
+		defaultCfg = {k: config.conf["lion"][k] for k in config.conf["lion"]}
 		screenRaw = locationHelper.RectLTWH(0, 0, 
 			ctypes.windll.user32.GetSystemMetrics(0), 
 			ctypes.windll.user32.GetSystemMetrics(1))
 		# Apply crop with default config
 		screenRect = self.cropRectLTWH(screenRaw, defaultCfg)
 		self._lastTargets = {0: screenRect, 1: screenRect, 2: screenRect, 3: screenRect}
-		self.createMenu()
+		try:
+			self.createMenu()
+		except Exception:
+			logHandler.log.exception(f"{ADDON_NAME}: Failed to create menu")
 	
 	def getProfilePath(self, appName):
 		safeName = "".join(x for x in appName if x.isalnum() or x in "-_")
