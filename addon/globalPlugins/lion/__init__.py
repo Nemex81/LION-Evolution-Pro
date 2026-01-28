@@ -69,10 +69,14 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		self._stateLock = threading.Lock()
 		self._ocrState = {}
 		self._profileLock = threading.Lock()
-		# Initialize last-valid targets to whole screen (no crop)
-		screenRect = locationHelper.RectLTWH(0, 0, 
+		# Initialize last-valid targets to CROPPED screen (not raw)
+		# Use default/global config for initial crop
+		defaultCfg = dict(config.conf["lion"])
+		screenRaw = locationHelper.RectLTWH(0, 0, 
 			ctypes.windll.user32.GetSystemMetrics(0), 
 			ctypes.windll.user32.GetSystemMetrics(1))
+		# Apply crop with default config
+		screenRect = self.cropRectLTWH(screenRaw, defaultCfg)
 		self._lastTargets = {0: screenRect, 1: screenRect, 2: screenRect, 3: screenRect}
 		self.createMenu()
 	
@@ -267,12 +271,13 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			screenRect = self.cropRectLTWH(locationHelper.RectLTWH(0, 0, self.resX, self.resY), cfg)
 			
 			# Try to get each target location, fall back to last-valid if unavailable
-			# Target 0: Navigator object
+			# Target 0: Navigator object (with crop applied)
 			navObj = api.getNavigatorObject()
 			navLoc = getattr(navObj, "location", None) if navObj else None
 			if navLoc:
-				targets[0] = navLoc
-				self._lastTargets[0] = navLoc
+				navCropped = self.cropRectLTWH(navLoc, cfg)
+				targets[0] = navCropped
+				self._lastTargets[0] = navCropped
 			else:
 				targets[0] = self._lastTargets[0]
 			
@@ -280,7 +285,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			targets[1] = screenRect
 			self._lastTargets[1] = screenRect
 			
-			# Target 2: Foreground object
+			# Target 2: Foreground object (with crop applied)
 			fgObj = api.getForegroundObject()
 			fgLoc = getattr(fgObj, "location", None) if fgObj else None
 			if fgLoc:
@@ -290,12 +295,13 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			else:
 				targets[2] = self._lastTargets[2]
 			
-			# Target 3: Focus object
+			# Target 3: Focus object (with crop applied)
 			focusObj = api.getFocusObject()
 			focusLoc = getattr(focusObj, "location", None) if focusObj else None
 			if focusLoc:
-				targets[3] = focusLoc
-				self._lastTargets[3] = focusLoc
+				focusCropped = self.cropRectLTWH(focusLoc, cfg)
+				targets[3] = focusCropped
+				self._lastTargets[3] = focusCropped
 			else:
 				targets[3] = self._lastTargets[3]
 				
