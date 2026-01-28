@@ -141,7 +141,6 @@ class frmMain(wx.Frame):
 	def _refreshProfileList(self):
 		"""Refresh the list of available profiles"""
 		self.lstProfiles.Clear()
-		profilesDir = os.path.join(self.backend.currentProfileData.__class__.__module__.split('.')[0] if hasattr(self.backend.currentProfileData, '__class__') else '', "profiles")
 		
 		# Use the PROFILES_DIR from the backend module
 		from addon.globalPlugins.lion import PROFILES_DIR
@@ -182,10 +181,12 @@ class frmMain(wx.Frame):
 		if dlg.ShowModal() == wx.ID_OK:
 			appName = dlg.GetValue().strip()
 			if appName:
-				# Create empty profile (override-only)
-				self.backend.saveProfileForApp(appName, {})
+				# Create profile with at least one override to prevent auto-deletion
+				# Use a small difference from global interval as initial override
+				initialOverride = {"interval": config.conf["lion"]["interval"] + 0.1}
+				self.backend.saveProfileForApp(appName, initialOverride)
 				self._refreshProfileList()
-				ui.message(_("Profile added for ") + appName)
+				ui.message(_("Profile added for ") + appName + _(" with initial override"))
 		dlg.Destroy()
 
 	def onDeleteProfile(self, event):
@@ -216,19 +217,22 @@ class frmMain(wx.Frame):
 		
 		profileName = self.lstProfiles.GetString(selection)
 		self.backend.loadProfileForApp(profileName)
-		self.lblActiveProfile.SetLabel(_("Active Profile: ") + profileName)
+		
+		# Update label from actual loaded profile (may be "global" if profile was empty)
+		actualProfile = self.backend.currentAppProfile
+		self.lblActiveProfile.SetLabel(_("Active Profile: ") + actualProfile)
 		
 		# Reload controls with new effective config
-		effectiveConfig = self.backend.getEffectiveConfig(profileName)
+		effectiveConfig = self.backend.getEffectiveConfig(actualProfile)
 		self.spinInterval.SetValue(float(effectiveConfig.get("interval", config.conf["lion"]["interval"])))
 		self.choiceTarget.SetSelection(int(effectiveConfig.get("target", config.conf["lion"]["target"])))
 		self.spinThreshold.SetValue(float(effectiveConfig.get("threshold", config.conf["lion"]["threshold"])))
-		self.spinCropLeft.SetValue(int(effectiveConfig.get("cropLeft", 0)))
-		self.spinCropRight.SetValue(int(effectiveConfig.get("cropRight", 0)))
-		self.spinCropUp.SetValue(int(effectiveConfig.get("cropUp", 0)))
-		self.spinCropDown.SetValue(int(effectiveConfig.get("cropDown", 0)))
+		self.spinCropLeft.SetValue(int(effectiveConfig.get("cropLeft", config.conf["lion"]["cropLeft"])))
+		self.spinCropRight.SetValue(int(effectiveConfig.get("cropRight", config.conf["lion"]["cropRight"])))
+		self.spinCropUp.SetValue(int(effectiveConfig.get("cropUp", config.conf["lion"]["cropUp"])))
+		self.spinCropDown.SetValue(int(effectiveConfig.get("cropDown", config.conf["lion"]["cropDown"])))
 		
-		ui.message(_("Loaded profile: ") + profileName)
+		ui.message(_("Loaded profile: ") + actualProfile)
 
 	def onSaveProfile(self, event):
 		"""Save current settings to active profile as overrides"""

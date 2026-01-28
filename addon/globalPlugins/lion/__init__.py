@@ -197,11 +197,11 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 				if profileData[key] != config.conf["lion"][key]:
 					overrides[key] = profileData[key]
 		
-		# Spotlight keys: always keep if present (they are inherently overrides)
+		# Spotlight keys: check if they differ from global (same pattern as standard keys)
 		spotlightKeys = ["spotlight_cropLeft", "spotlight_cropRight", "spotlight_cropUp", "spotlight_cropDown"]
 		for key in spotlightKeys:
 			if key in profileData:
-				# Check if it differs from global spotlight defaults
+				# Only keep if different from global defaults
 				if key in config.conf["lion"] and profileData[key] != config.conf["lion"][key]:
 					overrides[key] = profileData[key]
 				elif key not in config.conf["lion"]:
@@ -234,8 +234,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 					try:
 						os.remove(path)
 						logHandler.log.info(f"{ADDON_NAME}: Removed empty profile file for {appName}")
-					except:
-						pass
+					except OSError as e:
+						logHandler.log.warning(f"{ADDON_NAME}: Could not remove empty profile file for {appName}: {e}")
 					return
 				
 				# Save normalized profile back to disk (migration)
@@ -552,31 +552,36 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		pDown = int(((screenHeight - bottom) / screenHeight) * 100)
 		
 		# Update current profile data (spotlight overrides)
-		# Ensure we have a profile data dict to modify
-		if not self.currentProfileData:
-			self.currentProfileData = {}
-			
-		self.currentProfileData["spotlight_cropLeft"] = pLeft
-		self.currentProfileData["spotlight_cropRight"] = pRight
-		self.currentProfileData["spotlight_cropUp"] = pUp
-		self.currentProfileData["spotlight_cropDown"] = pDown
-		
-		# If we're in global mode, we need to get the current app to save a profile
+		# Thread-safe modification of profile data
 		with self._profileLock:
+			# Ensure we have a profile data dict to modify
+			if not self.currentProfileData:
+				self.currentProfileData = {}
+				
+			self.currentProfileData["spotlight_cropLeft"] = pLeft
+			self.currentProfileData["spotlight_cropRight"] = pRight
+			self.currentProfileData["spotlight_cropUp"] = pUp
+			self.currentProfileData["spotlight_cropDown"] = pDown
+			
 			appName = self.currentAppProfile
-			# If still global, try to get current foreground app
+			# If we're in global mode, try to get current foreground app
 			if appName == "global":
 				try:
 					fgObj = api.getForegroundObject()
 					if hasattr(fgObj, "appModule") and hasattr(fgObj.appModule, "appName"):
 						appName = fgObj.appModule.appName
 						self.currentAppProfile = appName
-				except:
-					pass
+				except (AttributeError, KeyError) as e:
+					logHandler.log.warning(f"{ADDON_NAME}: Could not get app name for spotlight: {e}")
+			
+			# Save immediately to persist
+			if appName != "global":
+				# Copy for saving outside lock
+				profileDataToSave = dict(self.currentProfileData)
 		
-		# Save immediately to persist
+		# Save outside of lock to avoid blocking
 		if appName != "global":
-			self.saveProfileForApp(appName, self.currentProfileData)
+			self.saveProfileForApp(appName, profileDataToSave)
 		
 		ui.message(_("Spotlight zone saved"))
 		self.spotlightStartPoint = None
