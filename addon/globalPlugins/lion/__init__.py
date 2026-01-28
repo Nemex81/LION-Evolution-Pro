@@ -10,7 +10,7 @@ Architecture:
    - Source of truth for all default settings
    - Used when no per-app profile exists (upstream behavior)
    - Keys: cropUp, cropLeft, cropRight, cropDown, target, threshold, interval
-   - Also includes spotlight_* keys for spotlight feature
+   - Single rectangle management system using main crop settings only
 
 2. Per-App Profiles (JSON files in PROFILES_DIR):
    - Store ONLY override values (keys that differ from global)
@@ -33,7 +33,7 @@ Compatibility Contract:
 - Apps without profiles use global config only (upstream behavior)
 - Profile switching is thread-safe (protected by _profileLock)
 - Anti-repeat state resets per app to avoid cross-app suppression
-- Spotlight feature works with both global and per-app configs
+- Single rectangle management system (spotlight feature removed for simplification)
 
 Key Methods:
 ------------
@@ -89,10 +89,6 @@ confspec={
 	"cropLeft": "integer(0,100,default=0)",
 	"cropRight": "integer(0,100,default=0)",
 	"cropDown": "integer(0,100,default=0)",
-	"spotlight_cropUp": "integer(0,100,default=0)",
-	"spotlight_cropLeft": "integer(0,100,default=0)",
-	"spotlight_cropRight": "integer(0,100,default=0)",
-	"spotlight_cropDown": "integer(0,100,default=0)",
 	"target": "integer(0,3,default=1)",
 	"threshold": "float(0.0,1.0,default=0.5)",
 	"interval": "float(0.0,10.0,default=1.0)"
@@ -111,8 +107,6 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 	
 	user32 = ctypes.windll.user32
 	resX, resY= user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)
-	
-	spotlightStartPoint = None
 	
 	def __init__(self):
 		super(GlobalPlugin, self).__init__()
@@ -154,10 +148,6 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			"cropRight": config.conf["lion"]["cropRight"],
 			"cropUp": config.conf["lion"]["cropUp"],
 			"cropDown": config.conf["lion"]["cropDown"],
-			"spotlight_cropLeft": config.conf["lion"]["spotlight_cropLeft"],
-			"spotlight_cropRight": config.conf["lion"]["spotlight_cropRight"],
-			"spotlight_cropUp": config.conf["lion"]["spotlight_cropUp"],
-			"spotlight_cropDown": config.conf["lion"]["spotlight_cropDown"],
 			"target": config.conf["lion"]["target"],
 			"threshold": config.conf["lion"]["threshold"],
 			"interval": config.conf["lion"]["interval"]
@@ -195,17 +185,6 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			if key in profileData:
 				# Only keep if different from global
 				if profileData[key] != config.conf["lion"][key]:
-					overrides[key] = profileData[key]
-		
-		# Spotlight keys: check if they differ from global (same pattern as standard keys)
-		spotlightKeys = ["spotlight_cropLeft", "spotlight_cropRight", "spotlight_cropUp", "spotlight_cropDown"]
-		for key in spotlightKeys:
-			if key in profileData:
-				# Only keep if different from global defaults
-				if key in config.conf["lion"] and profileData[key] != config.conf["lion"][key]:
-					overrides[key] = profileData[key]
-				elif key not in config.conf["lion"]:
-					# If spotlight key doesn't exist in global, keep it as override
 					overrides[key] = profileData[key]
 		
 		return overrides
@@ -361,19 +340,17 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			# Always call nextHandler
 			nextHandler()
 
-	def cropRectLTWH(self, r, cfg, useSpotlight=False):
+	def cropRectLTWH(self, r, cfg):
 		"""Crop rectangle using config. Pure function (no self state access).
 		Uses upstream LION-compatible crop semantics.
 		"""
 		if r is None: return locationHelper.RectLTWH(0,0,0,0)
 		
-		prefix = "spotlight_" if useSpotlight else ""
-		
 		try:
-			cLeft = int(cfg.get(f"{prefix}cropLeft", 0))
-			cUp = int(cfg.get(f"{prefix}cropUp", 0))
-			cRight = int(cfg.get(f"{prefix}cropRight", 0))
-			cDown = int(cfg.get(f"{prefix}cropDown", 0))
+			cLeft = int(cfg.get("cropLeft", 0))
+			cUp = int(cfg.get("cropUp", 0))
+			cRight = int(cfg.get("cropRight", 0))
+			cDown = int(cfg.get("cropDown", 0))
 		except (ValueError, TypeError):
 			cLeft, cUp, cRight, cDown = 0, 0, 0, 0
 		
@@ -515,117 +492,6 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		
 		recog.recognize(pixels, imgInfo, callback)
 	
-	def script_SetStartMarker(self, gesture):
-		logHandler.log.info("LION: script_SetStartMarker triggered")
-		pos = api.getMouseObject().location
-		# Store top-left of mouse pointer as the start point (x, y)
-		self.spotlightStartPoint = (pos.left, pos.top)
-		ui.message(_("Start marker set"))
-	
-	def script_SetEndMarker(self, gesture):
-		logHandler.log.info("LION: script_SetEndMarker triggered")
-		if not self.spotlightStartPoint:
-			ui.message(_("Set start marker first"))
-			return
-			
-		pos = api.getMouseObject().location
-		endX, endY = pos.left, pos.top
-		startX, startY = self.spotlightStartPoint
-		
-		# Calculate screen dimensions from global config or system metrics
-		screenWidth = self.resX
-		screenHeight = self.resY
-		
-		# Ensure start is top-left and end is bottom-right regardless of selection order
-		left = min(startX, endX)
-		top = min(startY, endY)
-		right = max(startX, endX)
-		bottom = max(startY, endY)
-		
-		# Calculate percentages relative to full screen
-		# Left % = (Left Coord / Width) * 100
-		pLeft = int((left / screenWidth) * 100)
-		pUp = int((top / screenHeight) * 100)
-		
-		# Right % = ((Width - Right Coord) / Width) * 100
-		pRight = int(((screenWidth - right) / screenWidth) * 100)
-		pDown = int(((screenHeight - bottom) / screenHeight) * 100)
-		
-		# Update current profile data (spotlight overrides)
-		# Thread-safe modification of profile data
-		with self._profileLock:
-			# Ensure we have a profile data dict to modify
-			if not self.currentProfileData:
-				self.currentProfileData = {}
-				
-			self.currentProfileData["spotlight_cropLeft"] = pLeft
-			self.currentProfileData["spotlight_cropRight"] = pRight
-			self.currentProfileData["spotlight_cropUp"] = pUp
-			self.currentProfileData["spotlight_cropDown"] = pDown
-			
-			appName = self.currentAppProfile
-			# If we're in global mode, try to get current foreground app
-			if appName == "global":
-				try:
-					fgObj = api.getForegroundObject()
-					if hasattr(fgObj, "appModule") and hasattr(fgObj.appModule, "appName"):
-						appName = fgObj.appModule.appName
-						self.currentAppProfile = appName
-				except (AttributeError, KeyError) as e:
-					logHandler.log.warning(f"{ADDON_NAME}: Could not get app name for spotlight: {e}")
-			
-			# Save immediately to persist
-			if appName != "global":
-				# Copy for saving outside lock
-				profileDataToSave = dict(self.currentProfileData)
-		
-		# Save outside of lock to avoid blocking
-		if appName != "global":
-			self.saveProfileForApp(appName, profileDataToSave)
-		
-		ui.message(_("Spotlight zone saved"))
-		self.spotlightStartPoint = None
-
-	def script_ScanSpotlight(self, gesture):
-		logHandler.log.info("LION: script_ScanSpotlight triggered")
-		# Manual scan of the spotlight zone
-		ui.message(_("Scanning spotlight..."))
-		
-		# Calculate rect based on spotlight settings
-		# Spotlight is always relative to SCREEN (target=1 equivalent)
-		
-		# Get current profile config for spotlight crop
-		with self._profileLock:
-			appName = self.currentAppProfile
-			cfg = self.getEffectiveConfig(appName)
-		
-		r = locationHelper.RectLTWH(0, 0, self.resX, self.resY)
-		rect = self.cropRectLTWH(r, cfg, useSpotlight=True)
-		
-		# Validate rect before OCR to avoid "Image not visible" error
-		if rect.width <= 0 or rect.height <= 0:
-			ui.message(_("Invalid spotlight area"))
-			return
-
-		try:
-			recog = contentRecog.uwpOcr.UwpOcr()
-			imgInfo = contentRecog.RecogImageInfo.createFromRecognizer(rect.left, rect.top, rect.width, rect.height, recog)
-			sb = screenBitmap.ScreenBitmap(imgInfo.recogWidth, imgInfo.recogHeight) 
-			pixels = sb.captureImage(rect.left, rect.top, rect.width, rect.height) 
-			
-			def on_spotlight_result(result):
-				o = type('NVDAObjects.NVDAObject', (), {})()
-				info = result.makeTextInfo(o, textInfos.POSITION_ALL)
-				if info.text:
-					ui.message(info.text)
-				else:
-					ui.message(_("No text found"))
-
-			recog.recognize(pixels, imgInfo, on_spotlight_result)
-		except Exception as e:
-			logHandler.log.error(f"Spotlight OCR failed: {e}")
-			ui.message(_("OCR error"))
-	
 	def _handleOcrResult(self, result, key, configuredThreshold):
 		"""Handle OCR result with per-key anti-repeat state.
 		
@@ -658,8 +524,5 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			ui.message(info.text)
 
 	__gestures={
-		"kb:nvda+alt+l":"ReadLiveOcr",
-		"kb:nvda+shift+1": "SetStartMarker",
-		"kb:nvda+shift+2": "SetEndMarker",
-		"kb:nvda+shift+l": "ScanSpotlight"
+		"kb:nvda+alt+l":"ReadLiveOcr"
 	}
