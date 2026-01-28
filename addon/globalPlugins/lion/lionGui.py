@@ -14,7 +14,8 @@ class frmMain(wx.Frame):
 		self.SetSize((420, 420))
 		self.Bind(wx.EVT_CLOSE, self.onClose)
 
-		data = backend.currentProfileData if backend.currentProfileData else config.conf["lion"]
+		# Get effective config (global + overrides)
+		effectiveConfig = backend.getEffectiveConfig(backend.currentAppProfile)
 
 		panel = wx.Panel(self)
 		mainSizer = wx.BoxSizer(wx.VERTICAL)
@@ -28,10 +29,10 @@ class frmMain(wx.Frame):
 		cropBox = wx.StaticBox(panel, label=_("Crop Settings (%)"))
 		cropSizer = wx.StaticBoxSizer(cropBox, wx.VERTICAL)
 
-		self.spinCropLeft = self._addSpin(cropSizer, cropBox, _("Crop Left"), int(data.get("cropLeft", 0)))
-		self.spinCropRight = self._addSpin(cropSizer, cropBox, _("Crop Right"), int(data.get("cropRight", 0)))
-		self.spinCropUp = self._addSpin(cropSizer, cropBox, _("Crop Up"), int(data.get("cropUp", 0)))
-		self.spinCropDown = self._addSpin(cropSizer, cropBox, _("Crop Down"), int(data.get("cropDown", 0)))
+		self.spinCropLeft = self._addSpin(cropSizer, cropBox, _("Crop Left"), int(effectiveConfig.get("cropLeft", 0)))
+		self.spinCropRight = self._addSpin(cropSizer, cropBox, _("Crop Right"), int(effectiveConfig.get("cropRight", 0)))
+		self.spinCropUp = self._addSpin(cropSizer, cropBox, _("Crop Up"), int(effectiveConfig.get("cropUp", 0)))
+		self.spinCropDown = self._addSpin(cropSizer, cropBox, _("Crop Down"), int(effectiveConfig.get("cropDown", 0)))
 
 		mainSizer.Add(cropSizer, 0, wx.ALL | wx.EXPAND, 5)
 
@@ -44,7 +45,7 @@ class frmMain(wx.Frame):
 			_("Current window"),
 			_("Current control")
 		])
-		self.choiceTarget.SetSelection(int(data.get("target", config.conf["lion"]["target"])))
+		self.choiceTarget.SetSelection(int(effectiveConfig.get("target", config.conf["lion"]["target"])))
 		targetSizer.Add(self.choiceTarget, 0, wx.ALL | wx.EXPAND, 5)
 		mainSizer.Add(targetSizer, 0, wx.ALL | wx.EXPAND, 5)
 
@@ -56,12 +57,12 @@ class frmMain(wx.Frame):
 		timingGrid.AddGrowableCol(1, 1)
 
 		timingGrid.Add(wx.StaticText(timingBox, label=_("Threshold (0-1)")), 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
-		self.spinThreshold = wx.SpinCtrlDouble(timingBox, min=0.0, max=1.0, inc=0.05, initial=float(data.get("threshold", config.conf["lion"]["threshold"])))
+		self.spinThreshold = wx.SpinCtrlDouble(timingBox, min=0.0, max=1.0, inc=0.05, initial=float(effectiveConfig.get("threshold", config.conf["lion"]["threshold"])))
 		self.spinThreshold.SetDigits(2)
 		timingGrid.Add(self.spinThreshold, 1, wx.ALL | wx.EXPAND, 5)
 
 		timingGrid.Add(wx.StaticText(timingBox, label=_("Interval (seconds)")), 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
-		self.spinInterval = wx.SpinCtrlDouble(timingBox, min=0.0, max=10.0, inc=0.1, initial=float(data.get("interval", config.conf["lion"]["interval"])))
+		self.spinInterval = wx.SpinCtrlDouble(timingBox, min=0.0, max=10.0, inc=0.1, initial=float(effectiveConfig.get("interval", config.conf["lion"]["interval"])))
 		self.spinInterval.SetDigits(1)
 		timingGrid.Add(self.spinInterval, 1, wx.ALL | wx.EXPAND, 5)
 
@@ -116,7 +117,17 @@ class frmMain(wx.Frame):
 
 	def onSaveProfile(self, event):
 		appName = self.backend.currentAppProfile
-		data = {
+		
+		# If we're in global mode, can't save a profile
+		if appName == "global":
+			ui.message(_("Cannot save profile in global mode. Switch to an app first."))
+			return
+		
+		# Build data with only values that differ from global config
+		# This creates an override-only profile
+		overrides = {}
+		
+		currentValues = {
 			"cropLeft": int(self.spinCropLeft.GetValue()),
 			"cropRight": int(self.spinCropRight.GetValue()),
 			"cropUp": int(self.spinCropUp.GetValue()),
@@ -126,15 +137,20 @@ class frmMain(wx.Frame):
 			"interval": self.spinInterval.GetValue()
 		}
 		
-		# Include spotlight values from backend if they exist
+		# Only include values that differ from global config
+		for key, value in currentValues.items():
+			if value != config.conf["lion"][key]:
+				overrides[key] = value
+		
+		# Include spotlight values from backend if they exist in current profile
 		if self.backend.currentProfileData:
 			for key in ["spotlight_cropLeft", "spotlight_cropRight", "spotlight_cropUp", "spotlight_cropDown"]:
 				if key in self.backend.currentProfileData:
-					data[key] = self.backend.currentProfileData[key]
+					overrides[key] = self.backend.currentProfileData[key]
 		
-		self.backend.saveProfileForApp(appName, data)
+		self.backend.saveProfileForApp(appName, overrides)
 		self.lblActiveProfile.SetLabel(_("Active Profile: ") + appName)
-		ui.message(_("Per-app profile saved"))
+		ui.message(_("Per-app profile saved (overrides only)"))
 
 	def onResetProfile(self, event):
 		appName = self.backend.currentAppProfile

@@ -64,12 +64,12 @@ This document serves as the primary instruction manual and progress tracker for 
   - [x] Update IMPLEMENTATION_PLAN.md with compatibility contract
   - [x] Add progress checklist section for Issue #11
 
-- [ ] **Commit 2: Core Refactor (Backend)**
-  - [ ] Implement `getEffectiveConfig(appName)` merging global + overrides
-  - [ ] Modify `loadProfileForApp(appName)` to keep `currentAppProfile = "global"` when no profile exists
-  - [ ] Ensure `currentProfileData = {}` (empty) when no profile exists
-  - [ ] Update `ocrLoop()` to use effective config snapshot via `getEffectiveConfig()`
-  - [ ] Preserve all robustness features (locks, last-valid targets, spotlight)
+- [x] **Commit 2: Core Refactor (Backend)**
+  - [x] Implement `getEffectiveConfig(appName)` merging global + overrides
+  - [x] Modify `loadProfileForApp(appName)` to keep `currentAppProfile = "global"` when no profile exists
+  - [x] Ensure `currentProfileData = {}` (empty) when no profile exists
+  - [x] Update `ocrLoop()` to use effective config snapshot via `getEffectiveConfig()`
+  - [x] Preserve all robustness features (locks, last-valid targets, spotlight)
 
 - [ ] **Commit 3: GUI Refactor**
   - [ ] Replace single-page dialog with `wx.Notebook` (two tabs)
