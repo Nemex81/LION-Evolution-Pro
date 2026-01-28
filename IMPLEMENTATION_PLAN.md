@@ -84,11 +84,11 @@ This document serves as the primary instruction manual and progress tracker for 
   - [x] Ensure spotlight keys fall back to global defaults if not in profile
   - [x] Optionally persist normalized profiles back to disk
 
-- [ ] **Commit 5: Polish & Manifest**
-  - [ ] Review user-facing strings and menu tooltips
-  - [ ] Update `addon/manifest.ini` author email
-  - [ ] Verify keyboard accessibility
-  - [ ] Add architecture documentation to docstrings
+- [x] **Commit 5: Polish & Manifest**
+  - [x] Review user-facing strings and menu tooltips
+  - [x] Update `addon/manifest.ini` author email
+  - [x] Verify keyboard accessibility
+  - [x] Add architecture documentation to docstrings
 
 ---
 

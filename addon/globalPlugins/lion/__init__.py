@@ -1,3 +1,48 @@
+"""
+LION Evolution Pro - Live OCR with Application-Specific Profiles
+
+This NVDA global plugin extends the upstream vortex1024/LION addon with per-application
+profile support while maintaining full upstream compatibility.
+
+Architecture:
+-------------
+1. Global Settings (config.conf["lion"]):
+   - Source of truth for all default settings
+   - Used when no per-app profile exists (upstream behavior)
+   - Keys: cropUp, cropLeft, cropRight, cropDown, target, threshold, interval
+   - Also includes spotlight_* keys for spotlight feature
+
+2. Per-App Profiles (JSON files in PROFILES_DIR):
+   - Store ONLY override values (keys that differ from global)
+   - Missing keys fall back to global config.conf["lion"]
+   - Profiles are loaded automatically on app focus change
+   - Profile format: {"threshold": 0.7, "interval": 2.0, ...}
+
+3. Effective Configuration:
+   - getEffectiveConfig(appName) merges global + profile overrides
+   - Used by ocrLoop() for each scan iteration
+   - Ensures consistent config snapshot per OCR operation
+
+4. Migration:
+   - Legacy profiles (full config) are auto-normalized to overrides
+   - Empty profiles (all values match global) are removed
+   - Normalization happens on first load after refactor
+
+Compatibility Contract:
+-----------------------
+- Apps without profiles use global config only (upstream behavior)
+- Profile switching is thread-safe (protected by _profileLock)
+- Anti-repeat state resets per app to avoid cross-app suppression
+- Spotlight feature works with both global and per-app configs
+
+Key Methods:
+------------
+- getEffectiveConfig(appName): Returns merged config (global + overrides)
+- loadProfileForApp(appName): Loads and normalizes profile, or falls back to global
+- saveProfileForApp(appName, data): Saves profile (overrides only)
+- _normalizeProfileToOverrides(data): Migration helper for legacy profiles
+"""
+
 import globalPluginHandler
 import addonHandler
 import scriptHandler
@@ -55,6 +100,11 @@ confspec={
 config.conf.spec["lion"]=confspec
 
 class GlobalPlugin(globalPluginHandler.GlobalPlugin):
+	"""LION Evolution Pro global plugin.
+	
+	Provides live OCR with per-application profile support.
+	Maintains upstream compatibility when no profile exists.
+	"""
 
 	currentAppProfile = "global"
 	currentProfileData = {}
