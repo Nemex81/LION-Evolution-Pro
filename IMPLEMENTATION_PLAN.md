@@ -71,13 +71,13 @@ This document serves as the primary instruction manual and progress tracker for 
   - [x] Update `ocrLoop()` to use effective config snapshot via `getEffectiveConfig()`
   - [x] Preserve all robustness features (locks, last-valid targets, spotlight)
 
-- [ ] **Commit 3: GUI Refactor**
-  - [ ] Replace single-page dialog with `wx.Notebook` (two tabs)
-  - [ ] Tab "General": Controls in upstream order (Interval → OCR Target → Threshold → Crop)
-  - [ ] Tab "Profiles": ListBox of profiles, Add/Delete/Set active buttons
-  - [ ] "OK" saves global settings only to `config.conf["lion"]`
-  - [ ] "Save Profile" saves overrides to JSON (only if profile active)
-  - [ ] Update profile label display
+- [x] **Commit 3: GUI Refactor**
+  - [x] Replace single-page dialog with `wx.Notebook` (two tabs)
+  - [x] Tab "General": Controls in upstream order (Interval → OCR Target → Threshold → Crop)
+  - [x] Tab "Profiles": ListBox of profiles, Add/Delete/Set active buttons
+  - [x] "OK" saves global settings only to `config.conf["lion"]`
+  - [x] "Save Profile" saves overrides to JSON (only if profile active)
+  - [x] Update profile label display
 
 - [ ] **Commit 4: Data Migration**
   - [ ] Normalize legacy profile JSON: remove keys equal to global values
