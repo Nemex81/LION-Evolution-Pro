@@ -69,6 +69,11 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		self._stateLock = threading.Lock()
 		self._ocrState = {}
 		self._profileLock = threading.Lock()
+		# Initialize last-valid targets to whole screen (no crop)
+		screenRect = locationHelper.RectLTWH(0, 0, 
+			ctypes.windll.user32.GetSystemMetrics(0), 
+			ctypes.windll.user32.GetSystemMetrics(1))
+		self._lastTargets = {0: screenRect, 1: screenRect, 2: screenRect, 3: screenRect}
 		self.createMenu()
 	
 	def getProfilePath(self, appName):
@@ -217,9 +222,10 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			# Always call nextHandler
 			nextHandler()
 
-	def cropRectLTWH(self, r, useSpotlight=False):
-		cfg = self.currentProfileData if self.currentProfileData else config.conf["lion"]
-		
+	def cropRectLTWH(self, r, cfg, useSpotlight=False):
+		"""Crop rectangle using config. Pure function (no self state access).
+		Uses upstream LION-compatible crop semantics.
+		"""
 		if r is None: return locationHelper.RectLTWH(0,0,0,0)
 		
 		prefix = "spotlight_" if useSpotlight else ""
@@ -232,13 +238,13 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		except (ValueError, TypeError):
 			cLeft, cUp, cRight, cDown = 0, 0, 0, 0
 		
-		# Calculate actual pixel values
-		newX = int(r.left + (r.width * cLeft / 100.0))
-		newY = int(r.top + (r.height * cUp / 100.0))
-		
-		# The remaining width is: TotalWidth - (LeftCropPixels + RightCropPixels)
-		newWidth = int(r.width * (100 - cLeft - cRight) / 100.0)
-		newHeight = int(r.height * (100 - cUp - cDown) / 100.0)
+		# Upstream LION-compatible formula
+		# Left/Top: (original + size) * percentage
+		# Width/Height: original size - (size * right/down percentage)
+		newX = int((r.left + r.width) * cLeft / 100.0)
+		newY = int((r.top + r.height) * cUp / 100.0)
+		newWidth = int(r.width - (r.width * cRight / 100.0))
+		newHeight = int(r.height - (r.height * cDown / 100.0))
 		
 		# Safety check to avoid negative or zero dimensions causing OCR crash
 		if newWidth <= 0: newWidth = 1
@@ -246,77 +252,115 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		
 		return locationHelper.RectLTWH(newX, newY, newWidth, newHeight)
 	
-	def _safeLocation(self, obj, fallbackRect):
-		"""Safely get location from object, returning fallback if unavailable."""
-		if obj is None:
-			return fallbackRect
-		location = getattr(obj, "location", None)
-		if location is None:
-			return fallbackRect
-		return location
-	
-	def rebuildTargets(self):
-		"""Rebuild targets dict using current profile settings."""
+	def rebuildTargets(self, cfg):
+		"""Rebuild targets dict using provided config. Keeps last-valid rects on failure.
+		
+		Args:
+			cfg: Configuration dict with crop/target settings
+		
+		Returns:
+			dict: Target index -> RectLTWH
+		"""
+		targets = {}
 		try:
-			# Safe fallback: whole screen rect
-			screenRect = self.cropRectLTWH(locationHelper.RectLTWH(0, 0, self.resX, self.resY))
+			# Compute screen rect with current crop settings
+			screenRect = self.cropRectLTWH(locationHelper.RectLTWH(0, 0, self.resX, self.resY), cfg)
 			
-			self.targets = {
-				0: self._safeLocation(api.getNavigatorObject(), screenRect),
-				1: screenRect,
-				2: self._safeLocation(api.getForegroundObject(), screenRect),
-				3: self._safeLocation(api.getFocusObject(), screenRect)
-			}
+			# Try to get each target location, fall back to last-valid if unavailable
+			# Target 0: Navigator object
+			navObj = api.getNavigatorObject()
+			navLoc = getattr(navObj, "location", None) if navObj else None
+			if navLoc:
+				targets[0] = navLoc
+				self._lastTargets[0] = navLoc
+			else:
+				targets[0] = self._lastTargets[0]
+			
+			# Target 1: Whole screen (always use current screenRect)
+			targets[1] = screenRect
+			self._lastTargets[1] = screenRect
+			
+			# Target 2: Foreground object
+			fgObj = api.getForegroundObject()
+			fgLoc = getattr(fgObj, "location", None) if fgObj else None
+			if fgLoc:
+				fgCropped = self.cropRectLTWH(fgLoc, cfg)
+				targets[2] = fgCropped
+				self._lastTargets[2] = fgCropped
+			else:
+				targets[2] = self._lastTargets[2]
+			
+			# Target 3: Focus object
+			focusObj = api.getFocusObject()
+			focusLoc = getattr(focusObj, "location", None) if focusObj else None
+			if focusLoc:
+				targets[3] = focusLoc
+				self._lastTargets[3] = focusLoc
+			else:
+				targets[3] = self._lastTargets[3]
+				
 		except Exception:
-			# On any error, set all targets to safe screen rect
-			logHandler.log.exception(f"{ADDON_NAME}: rebuildTargets failed, using fallback")
-			try:
-				screenRect = locationHelper.RectLTWH(0, 0, self.resX, self.resY)
-				self.targets = {0: screenRect, 1: screenRect, 2: screenRect, 3: screenRect}
-			except Exception:
-				# Last resort: minimal valid rect
-				logHandler.log.exception(f"{ADDON_NAME}: rebuildTargets fallback also failed")
-				minRect = locationHelper.RectLTWH(0, 0, 1, 1)
-				self.targets = {0: minRect, 1: minRect, 2: minRect, 3: minRect}
+			# On any error, use last-valid targets
+			logHandler.log.exception(f"{ADDON_NAME}: rebuildTargets failed, using last-valid")
+			targets = dict(self._lastTargets)
+		
+		return targets
 	
 	def ocrLoop(self):
 		global active
 		
-		# Build targets initially
-		self.rebuildTargets()
-
 		while(active==True ):
-			# Rebuild targets before each scan to pick up dynamic changes
-			self.rebuildTargets()
-			self.OcrScreen()
-			
-			# Use per-app interval with fallback to global (thread-safe)
+			# Snapshot profile config once per scan (thread-safe)
 			with self._profileLock:
-				interval = self.currentProfileData.get("interval", config.conf["lion"]["interval"]) if self.currentProfileData else config.conf["lion"]["interval"]
+				cfg = dict(self.currentProfileData) if self.currentProfileData else dict(config.conf["lion"])
+				appName = self.currentAppProfile
+			
+			# Rebuild targets with this config snapshot
+			targets = self.rebuildTargets(cfg)
+			
+			# Perform OCR with consistent config and targets
+			self.OcrScreen(cfg, appName, targets)
+			
+			# Use interval from same config snapshot
+			try:
+				interval = float(cfg.get("interval", config.conf["lion"]["interval"]))
+			except (ValueError, TypeError, KeyError):
+				interval = float(config.conf["lion"]["interval"])
 			time.sleep(interval)
 
-	def OcrScreen(self):
-		# Snapshot scan context for consistent state during callback
-		# Thread-safe profile data access
-		with self._profileLock:
-			appName = self.currentAppProfile
-			cfg = dict(self.currentProfileData) if self.currentProfileData else dict(config.conf["lion"])
+	def OcrScreen(self, cfg, appName, targets):
+		"""Perform OCR scan with provided config and targets.
 		
-		# Determine targetIndex with per-app profile fallback
+		Args:
+			cfg: Configuration dict snapshot
+			appName: Current app profile name
+			targets: Pre-computed target rectangles dict
+		"""
+		# Determine targetIndex from config snapshot
 		try:
 			targetIndex = int(cfg.get("target", config.conf["lion"]["target"]))
 		except (ValueError, TypeError, KeyError):
 			targetIndex = int(config.conf["lion"]["target"])
 		
-		# Get configured threshold for this app
+		# Get configured threshold from config snapshot
 		try:
 			configuredThreshold = float(cfg.get("threshold", config.conf["lion"]["threshold"]))
 		except (ValueError, TypeError, KeyError):
 			configuredThreshold = float(config.conf["lion"]["threshold"])
 		
+		# Get interval for logging
+		try:
+			interval = float(cfg.get("interval", config.conf["lion"]["interval"]))
+		except (ValueError, TypeError, KeyError):
+			interval = float(config.conf["lion"]["interval"])
+		
 		key = (appName, targetIndex)
 		
-		left, top, width, height = self.targets[targetIndex]
+		left, top, width, height = targets[targetIndex]
+		
+		# Debug logging (helps validate settings are applied)
+		logHandler.log.info(f"{ADDON_NAME} Scan: app={appName}, target={targetIndex}, "
+			f"rect=({left},{top},{width}x{height}), threshold={configuredThreshold:.2f}, interval={interval:.1f}")
 		
 		recog = contentRecog.uwpOcr.UwpOcr()
 
@@ -389,8 +433,12 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		# Calculate rect based on spotlight settings
 		# Spotlight is always relative to SCREEN (target=1 equivalent)
 		
+		# Get current profile config for spotlight crop
+		with self._profileLock:
+			cfg = dict(self.currentProfileData) if self.currentProfileData else dict(config.conf["lion"])
+		
 		r = locationHelper.RectLTWH(0, 0, self.resX, self.resY)
-		rect = self.cropRectLTWH(r, useSpotlight=True)
+		rect = self.cropRectLTWH(r, cfg, useSpotlight=True)
 		
 		# Validate rect before OCR to avoid "Image not visible" error
 		if rect.width <= 0 or rect.height <= 0:
