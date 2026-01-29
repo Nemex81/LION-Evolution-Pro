@@ -93,6 +93,66 @@ This document serves as the primary instruction manual and progress tracker for 
 
 ---
 
+## 🎨 GUI Overhaul + Unsaved Changes Protection (Issue #12)
+*Phase 8: Complete GUI refactor for efficient profile management with data loss prevention.*
+
+### Implementation Features
+
+**Tab Order:**
+- Profiles tab is FIRST (primary interaction point)
+- Settings tab is SECOND (shows active profile settings)
+
+**Profiles Tab:**
+- wx.ListCtrl in report mode with 2 columns: Profile, Status
+- Always shows "global" as first row (default profile)
+- Active profile marked with "Profilo attivo" status
+- Buttons: Create Profile, Delete Profile, Set Active Profile
+- No auto-switch to Settings tab after setting active profile
+
+**Settings Tab:**
+- Shows controls for currently active profile
+- Save button behavior:
+  - If active profile == "global": saves directly to config.conf["lion"]
+  - If app profile: computes overrides vs global and saves to profile JSON
+- Restore Defaults button:
+  - For app profiles: clears overrides (profile stays active, becomes identical to global)
+  - For global: disabled with informative message
+
+**Dirty Tracking:**
+- `_dirty` flag tracks unsaved changes to settings controls
+- `_suppressControlEvents` flag prevents programmatic updates from setting dirty
+- Control change events bound to `onControlChanged` handler
+
+**Data Loss Prevention:**
+- On window close: prompts if dirty with Save/Discard/Cancel options
+- On profile switch: prompts if dirty with Save and switch/Discard and switch/Cancel options
+- Never loses user data due to accidental actions
+
+**Backend Support:**
+- `setActiveProfile(appName)`: Handles both global and app profile activation
+- `clearOverridesForApp(appName)`: Clears overrides but keeps profile active
+
+### Progress Checklist (Issue #12)
+
+- [x] **Commit 1: Backend + GUI Implementation**
+  - [x] Add `setActiveProfile(appName)` method to backend
+  - [x] Add `clearOverridesForApp(appName)` method to backend
+  - [x] Complete GUI refactor with tab swap (Profiles first, Settings second)
+  - [x] Replace wx.ListBox with wx.ListCtrl (2 columns)
+  - [x] Implement dirty tracking flags and control event handling
+  - [x] Add data loss prevention prompts on close and profile switch
+  - [x] Implement Restore Defaults with profile-specific behavior
+  - [x] Add comprehensive exception handling and logging
+
+- [ ] **Commit 2: Testing & Validation**
+  - [ ] Manual testing of profile creation and switching
+  - [ ] Test dirty state prompts in various scenarios
+  - [ ] Test Restore Defaults for both profile types
+  - [ ] Screenshot UI changes for documentation
+  - [ ] Code review
+
+---
+
 ## 🛠️ Detailed Technical Specifications
 
 ### Phase 1: Infrastructure & Setup
