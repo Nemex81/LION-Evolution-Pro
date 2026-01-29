@@ -197,29 +197,34 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 	def loadProfileForApp(self, appName):
 		"""Load profile for specific app. If no profile exists, keeps currentAppProfile="global".
 		
+		Empty profiles ({}) are now supported and kept persistent - they represent
+		"same as global" but with explicit per-app tracking.
+		
 		Args:
 			appName: Application name to load profile for
 		"""
 		path = self.getProfilePath(appName)
 		if os.path.exists(path):
 			try:
-				with open(path, "r") as f:
+				with open(path, "r", encoding="utf-8") as f:
 					rawProfileData = json.load(f)
 				
 				# Migrate/normalize: convert full config to overrides-only
 				profileData = self._normalizeProfileToOverrides(rawProfileData)
 				
-				# If normalized profile is empty (all values matched global), treat as no profile
+				# Support empty profiles {} - they stay active and persistent
 				if not profileData:
-					logHandler.log.info(f"{ADDON_NAME}: Profile for {appName} is now empty after normalization (all values match global)")
-					self.currentAppProfile = "global"
+					logHandler.log.info(f"{ADDON_NAME}: Profile for {appName} exists but is empty (same as global)")
+					self.currentAppProfile = appName
 					self.currentProfileData = {}
-					# Optionally delete the empty profile file
-					try:
-						os.remove(path)
-						logHandler.log.info(f"{ADDON_NAME}: Removed empty profile file for {appName}")
-					except OSError as e:
-						logHandler.log.warning(f"{ADDON_NAME}: Could not remove empty profile file for {appName}: {e}")
+					# Save normalized/empty profile back to disk if migration occurred
+					if profileData != rawProfileData:
+						try:
+							with open(path, "w", encoding="utf-8") as f:
+								json.dump({}, f, indent=2)
+							logHandler.log.info(f"{ADDON_NAME}: Migrated profile for {appName} to empty format")
+						except Exception as e:
+							logHandler.log.error(f"{ADDON_NAME}: Failed to migrate profile for {appName}: {e}")
 					return
 				
 				# Save normalized profile back to disk (migration)
@@ -235,13 +240,15 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 				self.currentAppProfile = appName
 				logHandler.log.info(f"{ADDON_NAME}: Loaded profile overrides for {appName}")
 				return
+			except json.JSONDecodeError as e:
+				logHandler.log.error(f"{ADDON_NAME}: Invalid JSON in profile for {appName}: {e}", exc_info=True)
 			except Exception as e:
-				logHandler.log.error(f"{ADDON_NAME}: Error loading {appName}: {e}")
+				logHandler.log.error(f"{ADDON_NAME}: Error loading profile for {appName}: {e}", exc_info=True)
 		
-		# No profile exists - fall back to global (upstream behavior)
+		# No profile exists or failed to load - fall back to global (upstream behavior)
 		self.currentAppProfile = "global"
 		self.currentProfileData = {}
-		logHandler.log.info(f"{ADDON_NAME}: No profile for {appName}, using global config")
+		logHandler.log.info(f"{ADDON_NAME}: No valid profile for {appName}, using global config")
 	
 	def saveProfileForApp(self, appName, data):
 		"""Save profile for specific app. Profiles store only overrides.
@@ -270,6 +277,41 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 				logHandler.log.error(f"{ADDON_NAME}: Error deleting profile for {appName}: {e}")
 		self.loadGlobalProfile()
 	
+	def profileExists(self, appName):
+		"""Check if a profile file exists for the given app.
+		
+		Args:
+			appName: Application name
+			
+		Returns:
+			bool: True if profile file exists, False otherwise
+		"""
+		path = self.getProfilePath(appName)
+		return os.path.exists(path)
+	
+	def profileHasOverrides(self, appName):
+		"""Check if a profile has non-empty overrides.
+		
+		Args:
+			appName: Application name
+			
+		Returns:
+			bool: True if profile exists and has overrides, False if empty or doesn't exist
+		"""
+		if not self.profileExists(appName):
+			return False
+		
+		path = self.getProfilePath(appName)
+		try:
+			with open(path, "r", encoding="utf-8") as f:
+				data = json.load(f)
+			# Normalize to check if it has any overrides
+			normalized = self._normalizeProfileToOverrides(data)
+			return bool(normalized)
+		except Exception as e:
+			logHandler.log.error(f"{ADDON_NAME}: Error checking overrides for {appName}: {e}", exc_info=True)
+			return False
+	
 	def setActiveProfile(self, appName):
 		"""Set the active profile by loading the specified app profile.
 		
@@ -285,9 +327,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 	def clearOverridesForApp(self, appName):
 		"""Clear all overrides for an app profile but keep it active.
 		
-		This removes the profile file (if exists) and sets currentProfileData to {},
-		but maintains currentAppProfile == appName. The profile becomes identical
-		to global but stays active.
+		Writes empty {} to disk to maintain profile persistence. The profile
+		becomes identical to global but stays active.
 		
 		Args:
 			appName: Application name to clear overrides for
@@ -296,19 +337,19 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			logHandler.log.info(f"{ADDON_NAME}: Cannot clear overrides for global profile")
 			return
 		
-		# Remove profile file if it exists
+		# Write empty profile to disk (keep it persistent)
 		path = self.getProfilePath(appName)
-		if os.path.exists(path):
-			try:
-				os.remove(path)
-				logHandler.log.info(f"{ADDON_NAME}: Removed profile file for {appName}")
-			except Exception as e:
-				logHandler.log.error(f"{ADDON_NAME}: Error removing profile file for {appName}: {e}", exc_info=True)
+		try:
+			with open(path, "w", encoding="utf-8") as f:
+				json.dump({}, f, indent=2)
+			logHandler.log.info(f"{ADDON_NAME}: Cleared overrides for {appName}, wrote empty profile")
+		except Exception as e:
+			logHandler.log.error(f"{ADDON_NAME}: Error writing empty profile for {appName}: {e}", exc_info=True)
 		
 		# Keep profile active but with no overrides (identical to global)
 		self.currentAppProfile = appName
 		self.currentProfileData = {}
-		logHandler.log.info(f"{ADDON_NAME}: Cleared overrides for {appName}, profile still active")
+		logHandler.log.info(f"{ADDON_NAME}: Profile {appName} is now active with no overrides (same as global)")
 		
 	def createMenu(self):
 		try:

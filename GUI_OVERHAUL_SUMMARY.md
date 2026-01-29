@@ -1,15 +1,18 @@
 # LION Evolution Pro - GUI Overhaul Summary
 
-## Branch: copilot/profiles-gui-dirty-state
+## Branch: copilot/refactor-profiles-gui-overhaul
 
-This branch implements the complete GUI overhaul with unsaved changes protection as specified in the issue.
+This branch implements the complete GUI overhaul with unsaved changes protection and support for persistent empty profiles.
 
 ## Key Changes
 
 ### Backend (addon/globalPlugins/lion/__init__.py)
 - Added `setActiveProfile(appName)` method
-- Added `clearOverridesForApp(appName)` method
+- Added `clearOverridesForApp(appName)` method that writes `{}` to disk instead of deleting
+- Added `profileExists(appName)` and `profileHasOverrides(appName)` helper methods
 - Enhanced exception handling with tracebacks
+- **Support for empty `{}` profiles**: Profiles can exist with no overrides, representing "same as global"
+- Robust JSON error handling with fallback to global on corrupted files
 
 ### GUI (addon/globalPlugins/lion/lionGui.py)
 - Complete refactor with tab order: Profiles → Settings
@@ -18,6 +21,9 @@ This branch implements the complete GUI overhaul with unsaved changes protection
 - Added data loss prevention prompts
 - Profile-specific save/restore behavior
 - Comprehensive error handling
+- **Profile creation**: Creates empty `{}` profiles (no artificial overrides)
+- **Restore Defaults**: Clears overrides but keeps profile active (doesn't switch to global)
+- **Status column**: Shows "Same as global" for profiles with empty overrides
 
 ## All Requirements Met ✅
 
@@ -31,6 +37,15 @@ This branch implements the complete GUI overhaul with unsaved changes protection
 - Internationalization support
 - Exception handling with logging
 - Security scan passed (0 alerts)
+- **Empty profile support**: Profiles can be created and maintained with `{}` (no overrides)
+- **Status visibility**: "Same as global" shown for empty profiles
+
+## Profile Lifecycle
+
+1. **Create Profile**: Creates empty `{}` file, profile becomes active, settings show global values
+2. **Modify Settings**: Save creates overrides (only changed values stored)
+3. **Restore Defaults**: Clears overrides (writes `{}` back), profile stays active
+4. **Delete Profile**: Removes file completely, switches to global
 
 ## Next Steps
 

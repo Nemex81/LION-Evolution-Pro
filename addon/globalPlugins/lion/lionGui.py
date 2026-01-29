@@ -197,6 +197,9 @@ class frmMain(wx.Frame):
 					index = self.lstProfiles.InsertItem(self.lstProfiles.GetItemCount(), profileName)
 					if self.backend.currentAppProfile == profileName:
 						self.lstProfiles.SetItem(index, 1, _("Active Profile"))
+					elif not self.backend.profileHasOverrides(profileName):
+						# Profile exists but has no overrides (empty {})
+						self.lstProfiles.SetItem(index, 1, _("Same as global"))
 					else:
 						self.lstProfiles.SetItem(index, 1, "")
 		except Exception:
@@ -244,11 +247,8 @@ class frmMain(wx.Frame):
 			if dlg.ShowModal() == wx.ID_OK:
 				appName = dlg.GetValue().strip()
 				if appName and appName != "global":
-					# Create profile with minimal override (B: prevent empty profile normalization)
-					# Use interval + 0.1 as initial override to ensure profile persists
-					base = float(config.conf["lion"]["interval"])
-					interval = min(base + 0.1, 10.0)
-					self.backend.saveProfileForApp(appName, {"interval": interval})
+					# Create profile with empty overrides {} - persistent but same as global
+					self.backend.saveProfileForApp(appName, {})
 					
 					# Update UI to reflect the newly active profile
 					self.lblActiveProfile.SetLabel(_("Active Profile: ") + self.backend.currentAppProfile)
@@ -402,25 +402,23 @@ class frmMain(wx.Frame):
 				dlg.ShowModal()
 				dlg.Destroy()
 			else:
-				# For app profile: clear overrides and return to global (A)
+				# For app profile: clear overrides but stay active
 				dlg = wx.MessageDialog(self,
-					_("This will delete the profile and return to global settings. Continue?"),
+					_("This will clear all overrides for this profile, making it identical to global.\nThe profile will remain active. Continue?"),
 					_("Restore Defaults"),
 					wx.YES_NO | wx.ICON_QUESTION)
 				
 				if dlg.ShowModal() == wx.ID_YES:
-					# Clear overrides (deletes profile file)
+					# Clear overrides (writes empty {} to disk)
 					self.backend.clearOverridesForApp(appName)
-					# Explicitly switch to global profile
-					self.backend.setActiveProfile("global")
 					
-					# Update UI
+					# Update UI - profile stays active
 					self.lblActiveProfile.SetLabel(_("Active Profile: ") + self.backend.currentAppProfile)
 					self._refreshProfileList()
 					self._refreshSettingsControls()
 					self._dirty = False
 					
-					ui.message(_("Profile deleted, switched to global"))
+					ui.message(_("Overrides cleared, profile still active"))
 				dlg.Destroy()
 		except Exception:
 			logHandler.log.exception("LionEvolutionPro: Error restoring defaults")
