@@ -179,7 +179,7 @@ class frmMain(wx.Frame):
 			# Always add "global" as first row
 			index = self.lstProfiles.InsertItem(0, "global")
 			if self.backend.currentAppProfile == "global":
-				self.lstProfiles.SetItem(index, 1, _("Profilo attivo"))
+				self.lstProfiles.SetItem(index, 1, _("Active Profile"))
 			else:
 				self.lstProfiles.SetItem(index, 1, "")
 			
@@ -196,7 +196,7 @@ class frmMain(wx.Frame):
 				for profileName in profileNames:
 					index = self.lstProfiles.InsertItem(self.lstProfiles.GetItemCount(), profileName)
 					if self.backend.currentAppProfile == profileName:
-						self.lstProfiles.SetItem(index, 1, _("Profilo attivo"))
+						self.lstProfiles.SetItem(index, 1, _("Active Profile"))
 					else:
 						self.lstProfiles.SetItem(index, 1, "")
 		except Exception:
@@ -245,8 +245,15 @@ class frmMain(wx.Frame):
 				appName = dlg.GetValue().strip()
 				if appName and appName != "global":
 					# Create empty profile (no overrides initially)
+					# Note: This will set the profile as active
 					self.backend.saveProfileForApp(appName, {})
+					
+					# Update UI to reflect the newly active profile
+					self.lblActiveProfile.SetLabel(_("Active Profile: ") + self.backend.currentAppProfile)
 					self._refreshProfileList()
+					self._refreshSettingsControls()
+					self._dirty = False
+					
 					ui.message(_("Profile created for ") + appName)
 				elif appName == "global":
 					ui.message(_("Cannot create a profile named 'global'"))
@@ -332,10 +339,12 @@ class frmMain(wx.Frame):
 		"""Save current settings"""
 		try:
 			self._saveSettings()
+			# Only clear dirty flag if save succeeded (no exception raised)
 			self._dirty = False
 			ui.message(_("Settings saved"))
 		except Exception:
 			logHandler.log.exception("LionEvolutionPro: Error saving settings")
+			ui.message(_("Error saving settings"))
 
 	def _saveSettings(self):
 		"""Internal method to save settings"""
