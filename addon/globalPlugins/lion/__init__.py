@@ -269,6 +269,46 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			except Exception as e:
 				logHandler.log.error(f"{ADDON_NAME}: Error deleting profile for {appName}: {e}")
 		self.loadGlobalProfile()
+	
+	def setActiveProfile(self, appName):
+		"""Set the active profile by loading the specified app profile.
+		
+		Args:
+			appName: Profile name to activate (use "global" for global profile)
+		"""
+		if appName == "global":
+			self.loadGlobalProfile()
+		else:
+			self.loadProfileForApp(appName)
+		logHandler.log.info(f"{ADDON_NAME}: Active profile set to {self.currentAppProfile}")
+	
+	def clearOverridesForApp(self, appName):
+		"""Clear all overrides for an app profile but keep it active.
+		
+		This removes the profile file (if exists) and sets currentProfileData to {},
+		but maintains currentAppProfile == appName. The profile becomes identical
+		to global but stays active.
+		
+		Args:
+			appName: Application name to clear overrides for
+		"""
+		if appName == "global":
+			logHandler.log.info(f"{ADDON_NAME}: Cannot clear overrides for global profile")
+			return
+		
+		# Remove profile file if it exists
+		path = self.getProfilePath(appName)
+		if os.path.exists(path):
+			try:
+				os.remove(path)
+				logHandler.log.info(f"{ADDON_NAME}: Removed profile file for {appName}")
+			except Exception as e:
+				logHandler.log.error(f"{ADDON_NAME}: Error removing profile file for {appName}: {e}", exc_info=True)
+		
+		# Keep profile active but with no overrides (identical to global)
+		self.currentAppProfile = appName
+		self.currentProfileData = {}
+		logHandler.log.info(f"{ADDON_NAME}: Cleared overrides for {appName}, profile still active")
 		
 	def createMenu(self):
 		try:

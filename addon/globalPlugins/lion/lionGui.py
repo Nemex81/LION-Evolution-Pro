@@ -5,14 +5,21 @@ import config
 import ui
 import api
 import os
+import logHandler
 
 addonHandler.initTranslation()
 
 class frmMain(wx.Frame):
 	def __init__(self, parent, backend):
-		wx.Frame.__init__(self, parent, id=wx.ID_ANY, title=_("LION Settings"), style=wx.DEFAULT_FRAME_STYLE | wx.FRAME_FLOAT_ON_PARENT)
+		wx.Frame.__init__(self, parent, id=wx.ID_ANY, title=_("LION Settings"), 
+			style=wx.DEFAULT_FRAME_STYLE | wx.FRAME_FLOAT_ON_PARENT)
 		self.backend = backend
-		self.SetSize((500, 500))
+		self.SetSize((600, 550))
+		
+		# Dirty tracking flags
+		self._dirty = False
+		self._suppressControlEvents = False
+		
 		self.Bind(wx.EVT_CLOSE, self.onClose)
 
 		# Get effective config (global + overrides)
@@ -26,50 +33,84 @@ class frmMain(wx.Frame):
 		self.lblActiveProfile = wx.StaticText(panel, label=_("Active Profile: ") + backend.currentAppProfile)
 		mainSizer.Add(self.lblActiveProfile, 0, wx.ALL, 5)
 
-		# Create notebook with tabs
+		# Create notebook with tabs - PROFILES FIRST, then SETTINGS
 		self.notebook = wx.Notebook(panel)
 		mainSizer.Add(self.notebook, 1, wx.ALL | wx.EXPAND, 5)
 
-		# Tab 1: General Settings (upstream order)
-		self.generalTab = wx.Panel(self.notebook)
-		self.notebook.AddPage(self.generalTab, _("General"))
-		self._createGeneralTab(self.generalTab, effectiveConfig)
-
-		# Tab 2: Profiles
+		# Tab 1: Profiles (FIRST as per requirements)
 		self.profilesTab = wx.Panel(self.notebook)
 		self.notebook.AddPage(self.profilesTab, _("Profiles"))
 		self._createProfilesTab(self.profilesTab)
 
-		# OK / Cancel buttons
+		# Tab 2: Settings (SECOND as per requirements)
+		self.settingsTab = wx.Panel(self.notebook)
+		self.notebook.AddPage(self.settingsTab, _("Settings"))
+		self._createSettingsTab(self.settingsTab, effectiveConfig)
+
+		# Close button (no OK/Cancel - settings saved explicitly)
 		actionSizer = wx.BoxSizer(wx.HORIZONTAL)
-		self.btnOk = wx.Button(panel, wx.ID_OK, _("OK"))
-		self.btnCancel = wx.Button(panel, wx.ID_CANCEL, _("Cancel"))
-		actionSizer.Add(self.btnOk, 0, wx.ALL, 5)
-		actionSizer.Add(self.btnCancel, 0, wx.ALL, 5)
+		self.btnClose = wx.Button(panel, wx.ID_CLOSE, _("Close"))
+		actionSizer.Add(self.btnClose, 0, wx.ALL, 5)
 		mainSizer.Add(actionSizer, 0, wx.ALL | wx.ALIGN_RIGHT, 5)
 
 		# Bindings
-		self.btnOk.Bind(wx.EVT_BUTTON, self.btnOk_click)
-		self.btnCancel.Bind(wx.EVT_BUTTON, self.btnCancel_click)
+		self.btnClose.Bind(wx.EVT_BUTTON, self.onClose)
 
-	def _createGeneralTab(self, parent, effectiveConfig):
-		"""Create General settings tab with upstream order: Interval → Target → Threshold → Crop"""
+	def _createProfilesTab(self, parent):
+		"""Create Profiles management tab with ListCtrl"""
 		tabSizer = wx.BoxSizer(wx.VERTICAL)
 		parent.SetSizer(tabSizer)
 
-		# Interval (first, as per upstream)
+		# Profile list (using ListCtrl in report mode with 2 columns)
+		listBox = wx.StaticBox(parent, label=_("Available Profiles"))
+		listSizer = wx.StaticBoxSizer(listBox, wx.VERTICAL)
+		
+		self.lstProfiles = wx.ListCtrl(listBox, style=wx.LC_REPORT | wx.LC_SINGLE_SEL)
+		self.lstProfiles.AppendColumn(_("Profile"), width=200)
+		self.lstProfiles.AppendColumn(_("Status"), width=150)
+		
+		listSizer.Add(self.lstProfiles, 1, wx.ALL | wx.EXPAND, 5)
+		tabSizer.Add(listSizer, 1, wx.ALL | wx.EXPAND, 5)
+
+		# Populate profile list
+		self._refreshProfileList()
+
+		# Profile action buttons
+		btnSizer = wx.BoxSizer(wx.HORIZONTAL)
+		self.btnCreateProfile = wx.Button(parent, label=_("Create Profile"))
+		self.btnDeleteProfile = wx.Button(parent, label=_("Delete Profile"))
+		self.btnSetActive = wx.Button(parent, label=_("Set Active Profile"))
+		
+		btnSizer.Add(self.btnCreateProfile, 0, wx.ALL, 5)
+		btnSizer.Add(self.btnDeleteProfile, 0, wx.ALL, 5)
+		btnSizer.Add(self.btnSetActive, 0, wx.ALL, 5)
+		tabSizer.Add(btnSizer, 0, wx.ALL | wx.CENTER, 5)
+
+		# Bindings
+		self.btnCreateProfile.Bind(wx.EVT_BUTTON, self.onCreateProfile)
+		self.btnDeleteProfile.Bind(wx.EVT_BUTTON, self.onDeleteProfile)
+		self.btnSetActive.Bind(wx.EVT_BUTTON, self.onSetActive)
+
+	def _createSettingsTab(self, parent, effectiveConfig):
+		"""Create Settings tab with controls for active profile"""
+		tabSizer = wx.BoxSizer(wx.VERTICAL)
+		parent.SetSizer(tabSizer)
+
+		# Interval
 		intervalBox = wx.StaticBox(parent, label=_("Interval"))
 		intervalSizer = wx.StaticBoxSizer(intervalBox, wx.VERTICAL)
 		intervalGrid = wx.FlexGridSizer(cols=2, hgap=5, vgap=5)
 		intervalGrid.AddGrowableCol(1, 1)
-		intervalGrid.Add(wx.StaticText(intervalBox, label=_("Interval (seconds)")), 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
-		self.spinInterval = wx.SpinCtrlDouble(intervalBox, min=0.0, max=10.0, inc=0.1, initial=float(effectiveConfig.get("interval", config.conf["lion"]["interval"])))
+		intervalGrid.Add(wx.StaticText(intervalBox, label=_("Interval (seconds)")), 
+			0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
+		self.spinInterval = wx.SpinCtrlDouble(intervalBox, min=0.0, max=10.0, inc=0.1, 
+			initial=float(effectiveConfig.get("interval", config.conf["lion"]["interval"])))
 		self.spinInterval.SetDigits(1)
 		intervalGrid.Add(self.spinInterval, 1, wx.ALL | wx.EXPAND, 5)
 		intervalSizer.Add(intervalGrid, 0, wx.EXPAND | wx.ALL, 5)
 		tabSizer.Add(intervalSizer, 0, wx.ALL | wx.EXPAND, 5)
 
-		# OCR Target (second, as per upstream)
+		# OCR Target
 		targetBox = wx.StaticBox(parent, label=_("OCR Target"))
 		targetSizer = wx.StaticBoxSizer(targetBox, wx.VERTICAL)
 		self.choiceTarget = wx.Choice(targetBox, choices=[
@@ -82,75 +123,87 @@ class frmMain(wx.Frame):
 		targetSizer.Add(self.choiceTarget, 0, wx.ALL | wx.EXPAND, 5)
 		tabSizer.Add(targetSizer, 0, wx.ALL | wx.EXPAND, 5)
 
-		# Threshold (third, as per upstream)
+		# Threshold
 		thresholdBox = wx.StaticBox(parent, label=_("Threshold"))
 		thresholdSizer = wx.StaticBoxSizer(thresholdBox, wx.VERTICAL)
 		thresholdGrid = wx.FlexGridSizer(cols=2, hgap=5, vgap=5)
 		thresholdGrid.AddGrowableCol(1, 1)
-		thresholdGrid.Add(wx.StaticText(thresholdBox, label=_("Threshold (0-1)")), 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
-		self.spinThreshold = wx.SpinCtrlDouble(thresholdBox, min=0.0, max=1.0, inc=0.05, initial=float(effectiveConfig.get("threshold", config.conf["lion"]["threshold"])))
+		thresholdGrid.Add(wx.StaticText(thresholdBox, label=_("Threshold (0-1)")), 
+			0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
+		self.spinThreshold = wx.SpinCtrlDouble(thresholdBox, min=0.0, max=1.0, inc=0.05, 
+			initial=float(effectiveConfig.get("threshold", config.conf["lion"]["threshold"])))
 		self.spinThreshold.SetDigits(2)
 		thresholdGrid.Add(self.spinThreshold, 1, wx.ALL | wx.EXPAND, 5)
 		thresholdSizer.Add(thresholdGrid, 0, wx.EXPAND | wx.ALL, 5)
 		tabSizer.Add(thresholdSizer, 0, wx.ALL | wx.EXPAND, 5)
 
-		# Crop settings (fourth, as per upstream)
+		# Crop settings
 		cropBox = wx.StaticBox(parent, label=_("Crop Settings (%)"))
 		cropSizer = wx.StaticBoxSizer(cropBox, wx.VERTICAL)
-		self.spinCropLeft = self._addSpin(cropSizer, cropBox, _("Crop Left"), int(effectiveConfig.get("cropLeft", 0)))
-		self.spinCropRight = self._addSpin(cropSizer, cropBox, _("Crop Right"), int(effectiveConfig.get("cropRight", 0)))
-		self.spinCropUp = self._addSpin(cropSizer, cropBox, _("Crop Up"), int(effectiveConfig.get("cropUp", 0)))
-		self.spinCropDown = self._addSpin(cropSizer, cropBox, _("Crop Down"), int(effectiveConfig.get("cropDown", 0)))
+		self.spinCropLeft = self._addSpin(cropSizer, cropBox, _("Crop Left"), 
+			int(effectiveConfig.get("cropLeft", 0)))
+		self.spinCropRight = self._addSpin(cropSizer, cropBox, _("Crop Right"), 
+			int(effectiveConfig.get("cropRight", 0)))
+		self.spinCropUp = self._addSpin(cropSizer, cropBox, _("Crop Up"), 
+			int(effectiveConfig.get("cropUp", 0)))
+		self.spinCropDown = self._addSpin(cropSizer, cropBox, _("Crop Down"), 
+			int(effectiveConfig.get("cropDown", 0)))
 		tabSizer.Add(cropSizer, 0, wx.ALL | wx.EXPAND, 5)
 
-	def _createProfilesTab(self, parent):
-		"""Create Profiles management tab"""
-		tabSizer = wx.BoxSizer(wx.VERTICAL)
-		parent.SetSizer(tabSizer)
+		# Action buttons for Settings tab
+		settingsBtnSizer = wx.BoxSizer(wx.HORIZONTAL)
+		self.btnSave = wx.Button(parent, label=_("Save"))
+		self.btnRestoreDefaults = wx.Button(parent, label=_("Restore Defaults"))
+		settingsBtnSizer.Add(self.btnSave, 0, wx.ALL, 5)
+		settingsBtnSizer.Add(self.btnRestoreDefaults, 0, wx.ALL, 5)
+		tabSizer.Add(settingsBtnSizer, 0, wx.ALL | wx.CENTER, 5)
 
-		# Profile list
-		listBox = wx.StaticBox(parent, label=_("Available Profiles"))
-		listSizer = wx.StaticBoxSizer(listBox, wx.VERTICAL)
-		
-		self.lstProfiles = wx.ListBox(listBox)
-		listSizer.Add(self.lstProfiles, 1, wx.ALL | wx.EXPAND, 5)
-		tabSizer.Add(listSizer, 1, wx.ALL | wx.EXPAND, 5)
+		# Bindings for Settings buttons
+		self.btnSave.Bind(wx.EVT_BUTTON, self.onSave)
+		self.btnRestoreDefaults.Bind(wx.EVT_BUTTON, self.onRestoreDefaults)
 
-		# Populate profile list
-		self._refreshProfileList()
-
-		# Profile action buttons
-		btnSizer = wx.BoxSizer(wx.HORIZONTAL)
-		self.btnAddProfile = wx.Button(parent, label=_("Add Profile"))
-		self.btnDeleteProfile = wx.Button(parent, label=_("Delete Profile"))
-		self.btnSetActive = wx.Button(parent, label=_("Set Active"))
-		self.btnSaveProfile = wx.Button(parent, label=_("Save Current Settings to Profile"))
-		
-		btnSizer.Add(self.btnAddProfile, 0, wx.ALL, 5)
-		btnSizer.Add(self.btnDeleteProfile, 0, wx.ALL, 5)
-		btnSizer.Add(self.btnSetActive, 0, wx.ALL, 5)
-		btnSizer.Add(self.btnSaveProfile, 0, wx.ALL, 5)
-		tabSizer.Add(btnSizer, 0, wx.ALL | wx.CENTER, 5)
-
-		# Bindings
-		self.btnAddProfile.Bind(wx.EVT_BUTTON, self.onAddProfile)
-		self.btnDeleteProfile.Bind(wx.EVT_BUTTON, self.onDeleteProfile)
-		self.btnSetActive.Bind(wx.EVT_BUTTON, self.onSetActive)
-		self.btnSaveProfile.Bind(wx.EVT_BUTTON, self.onSaveProfile)
+		# Bind control change events to set dirty flag
+		self.spinInterval.Bind(wx.EVT_SPINCTRLDOUBLE, self.onControlChanged)
+		self.choiceTarget.Bind(wx.EVT_CHOICE, self.onControlChanged)
+		self.spinThreshold.Bind(wx.EVT_SPINCTRLDOUBLE, self.onControlChanged)
+		self.spinCropLeft.Bind(wx.EVT_SPINCTRL, self.onControlChanged)
+		self.spinCropRight.Bind(wx.EVT_SPINCTRL, self.onControlChanged)
+		self.spinCropUp.Bind(wx.EVT_SPINCTRL, self.onControlChanged)
+		self.spinCropDown.Bind(wx.EVT_SPINCTRL, self.onControlChanged)
 
 	def _refreshProfileList(self):
-		"""Refresh the list of available profiles"""
-		self.lstProfiles.Clear()
-		
-		# Use the PROFILES_DIR from the backend module
-		from . import PROFILES_DIR
-		if os.path.exists(PROFILES_DIR):
-			for filename in sorted(os.listdir(PROFILES_DIR)):
-				if filename.endswith('.json'):
-					profileName = filename[:-5]  # Remove .json extension
-					self.lstProfiles.Append(profileName)
+		"""Refresh the list of available profiles (ListCtrl with global first)"""
+		try:
+			self.lstProfiles.DeleteAllItems()
+			
+			# Always add "global" as first row
+			index = self.lstProfiles.InsertItem(0, "global")
+			if self.backend.currentAppProfile == "global":
+				self.lstProfiles.SetItem(index, 1, _("Profilo attivo"))
+			else:
+				self.lstProfiles.SetItem(index, 1, "")
+			
+			# Use the PROFILES_DIR from the backend module
+			from . import PROFILES_DIR
+			if os.path.exists(PROFILES_DIR):
+				profileNames = []
+				for filename in sorted(os.listdir(PROFILES_DIR)):
+					if filename.endswith('.json'):
+						profileName = filename[:-5]  # Remove .json extension
+						profileNames.append(profileName)
+				
+				# Add profiles to list
+				for profileName in profileNames:
+					index = self.lstProfiles.InsertItem(self.lstProfiles.GetItemCount(), profileName)
+					if self.backend.currentAppProfile == profileName:
+						self.lstProfiles.SetItem(index, 1, _("Profilo attivo"))
+					else:
+						self.lstProfiles.SetItem(index, 1, "")
+		except Exception:
+			logHandler.log.exception("LionEvolutionPro: Error refreshing profile list")
 
 	def _addSpin(self, sizer, parent, label, value):
+		"""Helper to add a spin control with label"""
 		row = wx.BoxSizer(wx.HORIZONTAL)
 		row.Add(wx.StaticText(parent, label=label), 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
 		spin = wx.SpinCtrl(parent, min=0, max=100, initial=value)
@@ -158,94 +211,135 @@ class frmMain(wx.Frame):
 		sizer.Add(row, 0, wx.EXPAND)
 		return spin
 
-	def btnOk_click(self, event):
-		"""OK button saves ONLY global settings to config.conf["lion"]"""
-		config.conf["lion"]["threshold"] = self.spinThreshold.GetValue()
-		config.conf["lion"]["interval"] = self.spinInterval.GetValue()
-		config.conf["lion"]["target"] = self.choiceTarget.GetSelection()
-		config.conf["lion"]["cropLeft"] = int(self.spinCropLeft.GetValue())
-		config.conf["lion"]["cropRight"] = int(self.spinCropRight.GetValue())
-		config.conf["lion"]["cropUp"] = int(self.spinCropUp.GetValue())
-		config.conf["lion"]["cropDown"] = int(self.spinCropDown.GetValue())
+	def onControlChanged(self, event):
+		"""Called when any control value changes - set dirty flag if not suppressed"""
+		if not self._suppressControlEvents:
+			self._dirty = True
+		event.Skip()
 
-		ui.message(_("Global settings saved"))
-		self.Close()  # triggers onClose
+	def _refreshSettingsControls(self):
+		"""Refresh Settings tab controls with active profile config"""
+		try:
+			self._suppressControlEvents = True
+			effectiveConfig = self.backend.getEffectiveConfig(self.backend.currentAppProfile)
+			
+			self.spinInterval.SetValue(float(effectiveConfig.get("interval", config.conf["lion"]["interval"])))
+			self.choiceTarget.SetSelection(int(effectiveConfig.get("target", config.conf["lion"]["target"])))
+			self.spinThreshold.SetValue(float(effectiveConfig.get("threshold", config.conf["lion"]["threshold"])))
+			self.spinCropLeft.SetValue(int(effectiveConfig.get("cropLeft", config.conf["lion"]["cropLeft"])))
+			self.spinCropRight.SetValue(int(effectiveConfig.get("cropRight", config.conf["lion"]["cropRight"])))
+			self.spinCropUp.SetValue(int(effectiveConfig.get("cropUp", config.conf["lion"]["cropUp"])))
+			self.spinCropDown.SetValue(int(effectiveConfig.get("cropDown", config.conf["lion"]["cropDown"])))
+		except Exception:
+			logHandler.log.exception("LionEvolutionPro: Error refreshing settings controls")
+		finally:
+			self._suppressControlEvents = False
 
-	def btnCancel_click(self, event):
-		ui.message(_("Changes canceled"))
-		self.Close()  # triggers onClose
-
-	def onAddProfile(self, event):
-		"""Add a new profile for a specific application"""
-		dlg = wx.TextEntryDialog(self, _("Enter application name (e.g., notepad, firefox):"), _("Add Profile"))
-		if dlg.ShowModal() == wx.ID_OK:
-			appName = dlg.GetValue().strip()
-			if appName:
-				# Create profile with at least one override to prevent auto-deletion
-				# Use a small difference from global interval as initial override
-				initialOverride = {"interval": config.conf["lion"]["interval"] + 0.1}
-				self.backend.saveProfileForApp(appName, initialOverride)
-				self._refreshProfileList()
-				ui.message(_("Profile added for ") + appName + _(" with initial override"))
-		dlg.Destroy()
+	def onCreateProfile(self, event):
+		"""Create a new profile for a specific application"""
+		try:
+			dlg = wx.TextEntryDialog(self, 
+				_("Enter application name (e.g., notepad, firefox):"), 
+				_("Create Profile"))
+			if dlg.ShowModal() == wx.ID_OK:
+				appName = dlg.GetValue().strip()
+				if appName and appName != "global":
+					# Create empty profile (no overrides initially)
+					self.backend.saveProfileForApp(appName, {})
+					self._refreshProfileList()
+					ui.message(_("Profile created for ") + appName)
+				elif appName == "global":
+					ui.message(_("Cannot create a profile named 'global'"))
+			dlg.Destroy()
+		except Exception:
+			logHandler.log.exception("LionEvolutionPro: Error creating profile")
 
 	def onDeleteProfile(self, event):
 		"""Delete selected profile"""
-		selection = self.lstProfiles.GetSelection()
-		if selection == wx.NOT_FOUND:
-			ui.message(_("No profile selected"))
-			return
-		
-		profileName = self.lstProfiles.GetString(selection)
-		dlg = wx.MessageDialog(self, 
-			_("Delete profile for ") + profileName + "?",
-			_("Confirm Delete"),
-			wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION)
-		
-		if dlg.ShowModal() == wx.ID_YES:
-			self.backend.deleteProfileForApp(profileName)
-			self._refreshProfileList()
-			ui.message(_("Profile deleted"))
-		dlg.Destroy()
+		try:
+			selection = self.lstProfiles.GetFirstSelected()
+			if selection == -1:
+				ui.message(_("No profile selected"))
+				return
+			
+			profileName = self.lstProfiles.GetItemText(selection, 0)
+			
+			# Can't delete global
+			if profileName == "global":
+				ui.message(_("Cannot delete global profile"))
+				return
+			
+			dlg = wx.MessageDialog(self, 
+				_("Delete profile for ") + profileName + "?",
+				_("Confirm Delete"),
+				wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION)
+			
+			if dlg.ShowModal() == wx.ID_YES:
+				self.backend.deleteProfileForApp(profileName)
+				self._refreshProfileList()
+				self.lblActiveProfile.SetLabel(_("Active Profile: ") + self.backend.currentAppProfile)
+				self._refreshSettingsControls()
+				self._dirty = False
+				ui.message(_("Profile deleted"))
+			dlg.Destroy()
+		except Exception:
+			logHandler.log.exception("LionEvolutionPro: Error deleting profile")
 
 	def onSetActive(self, event):
-		"""Set the selected profile as active (load it)"""
-		selection = self.lstProfiles.GetSelection()
-		if selection == wx.NOT_FOUND:
-			ui.message(_("No profile selected"))
-			return
-		
-		profileName = self.lstProfiles.GetString(selection)
-		self.backend.loadProfileForApp(profileName)
-		
-		# Update label from actual loaded profile (may be "global" if profile was empty)
-		actualProfile = self.backend.currentAppProfile
-		self.lblActiveProfile.SetLabel(_("Active Profile: ") + actualProfile)
-		
-		# Reload controls with new effective config
-		effectiveConfig = self.backend.getEffectiveConfig(actualProfile)
-		self.spinInterval.SetValue(float(effectiveConfig.get("interval", config.conf["lion"]["interval"])))
-		self.choiceTarget.SetSelection(int(effectiveConfig.get("target", config.conf["lion"]["target"])))
-		self.spinThreshold.SetValue(float(effectiveConfig.get("threshold", config.conf["lion"]["threshold"])))
-		self.spinCropLeft.SetValue(int(effectiveConfig.get("cropLeft", config.conf["lion"]["cropLeft"])))
-		self.spinCropRight.SetValue(int(effectiveConfig.get("cropRight", config.conf["lion"]["cropRight"])))
-		self.spinCropUp.SetValue(int(effectiveConfig.get("cropUp", config.conf["lion"]["cropUp"])))
-		self.spinCropDown.SetValue(int(effectiveConfig.get("cropDown", config.conf["lion"]["cropDown"])))
-		
-		ui.message(_("Loaded profile: ") + actualProfile)
+		"""Set the selected profile as active (with dirty check)"""
+		try:
+			selection = self.lstProfiles.GetFirstSelected()
+			if selection == -1:
+				ui.message(_("No profile selected"))
+				return
+			
+			profileName = self.lstProfiles.GetItemText(selection, 0)
+			
+			# Check if dirty
+			if self._dirty:
+				dlg = wx.MessageDialog(self,
+					_("You have unsaved changes. What would you like to do?"),
+					_("Unsaved Changes"),
+					wx.YES_NO | wx.CANCEL | wx.ICON_QUESTION)
+				dlg.SetYesNoCancelLabels(_("Save and Switch"), _("Discard and Switch"), _("Cancel"))
+				result = dlg.ShowModal()
+				dlg.Destroy()
+				
+				if result == wx.ID_YES:
+					# Save and switch
+					self._saveSettings()
+				elif result == wx.ID_NO:
+					# Discard and switch
+					pass
+				else:
+					# Cancel
+					return
+			
+			# Set active profile
+			self.backend.setActiveProfile(profileName)
+			
+			# Update UI (but do NOT switch tabs)
+			self.lblActiveProfile.SetLabel(_("Active Profile: ") + self.backend.currentAppProfile)
+			self._refreshProfileList()
+			self._refreshSettingsControls()
+			self._dirty = False
+			
+			ui.message(_("Active profile: ") + self.backend.currentAppProfile)
+		except Exception:
+			logHandler.log.exception("LionEvolutionPro: Error setting active profile")
 
-	def onSaveProfile(self, event):
-		"""Save current settings to active profile as overrides"""
+	def onSave(self, event):
+		"""Save current settings"""
+		try:
+			self._saveSettings()
+			self._dirty = False
+			ui.message(_("Settings saved"))
+		except Exception:
+			logHandler.log.exception("LionEvolutionPro: Error saving settings")
+
+	def _saveSettings(self):
+		"""Internal method to save settings"""
 		appName = self.backend.currentAppProfile
-		
-		# If we're in global mode, can't save a profile
-		if appName == "global":
-			ui.message(_("Cannot save profile in global mode. Use 'Add Profile' first or switch to an app."))
-			return
-		
-		# Build data with only values that differ from global config
-		# This creates an override-only profile
-		overrides = {}
 		
 		currentValues = {
 			"cropLeft": int(self.spinCropLeft.GetValue()),
@@ -257,14 +351,80 @@ class frmMain(wx.Frame):
 			"interval": self.spinInterval.GetValue()
 		}
 		
-		# Only include values that differ from global config
-		for key, value in currentValues.items():
-			if value != config.conf["lion"][key]:
-				overrides[key] = value
-		
-		self.backend.saveProfileForApp(appName, overrides)
-		ui.message(_("Profile saved for ") + appName + _(" (overrides only)"))
+		if appName == "global":
+			# Save directly to config.conf["lion"]
+			for key, value in currentValues.items():
+				config.conf["lion"][key] = value
+			logHandler.log.info("LionEvolutionPro: Saved global settings to config.conf")
+		else:
+			# Compute overrides (only values different from global)
+			overrides = {}
+			for key, value in currentValues.items():
+				if value != config.conf["lion"][key]:
+					overrides[key] = value
+			
+			# Save profile with overrides
+			self.backend.saveProfileForApp(appName, overrides)
+			logHandler.log.info(f"LionEvolutionPro: Saved profile for {appName} with overrides")
+
+	def onRestoreDefaults(self, event):
+		"""Restore defaults for current profile"""
+		try:
+			appName = self.backend.currentAppProfile
+			
+			if appName == "global":
+				# For global, show message that this would reset to factory defaults
+				dlg = wx.MessageDialog(self,
+					_("Restore defaults is disabled for global profile.\nTo reset global settings, use NVDA's configuration reset."),
+					_("Restore Defaults"),
+					wx.OK | wx.ICON_INFORMATION)
+				dlg.ShowModal()
+				dlg.Destroy()
+			else:
+				# For app profile: clear overrides but keep active
+				dlg = wx.MessageDialog(self,
+					_("This will clear all overrides for this profile, making it identical to global.\nThe profile will stay active. Continue?"),
+					_("Restore Defaults"),
+					wx.YES_NO | wx.ICON_QUESTION)
+				
+				if dlg.ShowModal() == wx.ID_YES:
+					self.backend.clearOverridesForApp(appName)
+					self._refreshSettingsControls()
+					self._dirty = False
+					ui.message(_("Overrides cleared for ") + appName)
+				dlg.Destroy()
+		except Exception:
+			logHandler.log.exception("LionEvolutionPro: Error restoring defaults")
 
 	def onClose(self, event):
-		self.backend.settingsDialog = None
-		self.Destroy()
+		"""Handle window close with dirty check"""
+		try:
+			if self._dirty:
+				dlg = wx.MessageDialog(self,
+					_("You have unsaved changes. What would you like to do?"),
+					_("Unsaved Changes"),
+					wx.YES_NO | wx.CANCEL | wx.ICON_QUESTION)
+				dlg.SetYesNoCancelLabels(_("Save"), _("Discard"), _("Cancel"))
+				result = dlg.ShowModal()
+				dlg.Destroy()
+				
+				if result == wx.ID_YES:
+					# Save and close
+					self._saveSettings()
+				elif result == wx.ID_NO:
+					# Discard and close
+					pass
+				else:
+					# Cancel close
+					if hasattr(event, 'Veto'):
+						event.Veto()
+					return
+			
+			# Close the dialog
+			self.backend.settingsDialog = None
+			self.Destroy()
+		except Exception:
+			logHandler.log.exception("LionEvolutionPro: Error closing dialog")
+			# Always clean up
+			self.backend.settingsDialog = None
+			self.Destroy()
