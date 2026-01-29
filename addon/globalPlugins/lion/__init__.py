@@ -60,7 +60,11 @@ import threading
 import config
 import wx
 import locationHelper
-from . import lionGui
+try:
+	from . import lionGui
+except ImportError:
+	lionGui = None
+	logHandler.log.error("LionEvolutionPro: Failed to import lionGui", exc_info=True)
 from scriptHandler import getLastScriptRepeatCount, script
 
 from difflib import SequenceMatcher
@@ -110,6 +114,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 	
 	def __init__(self):
 		super(GlobalPlugin, self).__init__()
+		self.settingsDialog = None
 		self._stateLock = threading.Lock()
 		self._ocrState = {}
 		self._profileLock = threading.Lock()
@@ -266,35 +271,66 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		self.loadGlobalProfile()
 		
 	def createMenu(self):
-		self.prefsMenu = gui.mainFrame.sysTrayIcon.menu.GetMenuItems()[0].GetSubMenu()
-		self.lionSettingsItem = self.prefsMenu.Append(wx.ID_ANY,
-			# Translators: name of the option in the menu.
-			_("&Lion Evolution Pro settings..."),
-			# Translators: tooltip text for the menu item.
-			_("Modify OCR zone, interval and per-app profiles"))
-		gui.mainFrame.sysTrayIcon.Bind(wx.EVT_MENU, self.onSettings, self.lionSettingsItem)
+		try:
+			self.prefsMenu = gui.mainFrame.sysTrayIcon.menu.GetMenuItems()[0].GetSubMenu()
+			self.lionSettingsItem = self.prefsMenu.Append(wx.ID_ANY,
+				# Translators: name of the option in the menu.
+				_("&Lion Evolution Pro settings..."),
+				# Translators: tooltip text for the menu item.
+				_("Modify OCR zone, interval and per-app profiles"))
+			gui.mainFrame.sysTrayIcon.Bind(wx.EVT_MENU, self.onSettings, self.lionSettingsItem)
+		except Exception:
+			logHandler.log.exception(f"{ADDON_NAME}: Error in createMenu")
 
 	def terminate(self):
 		try:
-			self.prefsMenu.RemoveItem(self.lionSettingsItem)
-		except wx.PyDeadObjectError:
+			if hasattr(self, "settingsDialog") and self.settingsDialog:
+				self.settingsDialog.Close()
+				self.settingsDialog = None
+		except (wx.PyDeadObjectError, RuntimeError):
 			pass
+		except Exception:
+			logHandler.log.exception(f"{ADDON_NAME}: Error closing settings dialog in terminate")
+		
+		try:
+			if hasattr(self, "prefsMenu") and hasattr(self, "lionSettingsItem"):
+				self.prefsMenu.RemoveItem(self.lionSettingsItem)
+		except (wx.PyDeadObjectError, RuntimeError, AttributeError):
+			pass
+		except Exception:
+			logHandler.log.exception(f"{ADDON_NAME}: Error removing menu item in terminate")
 
 	def onSettings(self, evt):
-		if hasattr(self, "settingsDialog") and self.settingsDialog:
+		# Check if lionGui module loaded successfully
+		if lionGui is None:
+			logHandler.log.error(f"{ADDON_NAME}: Cannot open settings - lionGui module failed to load")
+			ui.message(_("Error: Settings module not available"))
+			return
+		
+		# Try to raise existing dialog if it exists
+		if self.settingsDialog:
 			try:
 				self.settingsDialog.Raise()
 				self.settingsDialog.Show()
+				logHandler.log.info(f"{ADDON_NAME}: Raised existing settings dialog")
 				return
-			except Exception:
+			except (wx.PyDeadObjectError, RuntimeError):
+				# Dialog object is dead, need to create a new one
+				logHandler.log.info(f"{ADDON_NAME}: Existing dialog is dead, creating new one")
 				self.settingsDialog = None
+			except Exception:
+				logHandler.log.exception(f"{ADDON_NAME}: Error raising existing settings dialog")
+				self.settingsDialog = None
+		
+		# Create new dialog
 		try:
 			self.settingsDialog = lionGui.frmMain(gui.mainFrame, self)
 			self.settingsDialog.Show()
-		except Exception as e:
-			logHandler.log.error(f"{ADDON_NAME}: Error creating settings dialog: {e}")
+			logHandler.log.info(f"{ADDON_NAME}: Settings dialog opened successfully")
+		except Exception:
+			logHandler.log.exception(f"{ADDON_NAME}: Error creating settings dialog")
 			self.settingsDialog = None
-			ui.message("Error opening settings")
+			ui.message(_("Error opening settings"))
 
 	def script_ReadLiveOcr(self, gesture):
 		repeat = getLastScriptRepeatCount()

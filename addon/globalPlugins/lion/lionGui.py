@@ -143,7 +143,7 @@ class frmMain(wx.Frame):
 		self.lstProfiles.Clear()
 		
 		# Use the PROFILES_DIR from the backend module
-		from addon.globalPlugins.lion import PROFILES_DIR
+		from . import PROFILES_DIR
 		if os.path.exists(PROFILES_DIR):
 			for filename in sorted(os.listdir(PROFILES_DIR)):
 				if filename.endswith('.json'):
