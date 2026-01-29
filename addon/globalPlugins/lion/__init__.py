@@ -62,7 +62,7 @@ import wx
 import locationHelper
 try:
 	from . import lionGui
-except ImportError:
+except Exception:
 	lionGui = None
 	logHandler.log.error("LionEvolutionPro: Failed to import lionGui", exc_info=True)
 from scriptHandler import getLastScriptRepeatCount, script
@@ -288,7 +288,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 				self.settingsDialog.Close()
 				self.settingsDialog = None
 		except (wx.PyDeadObjectError, RuntimeError, AttributeError):
-			pass
+			logHandler.log.debug(f"{ADDON_NAME}: Dialog already destroyed or dead, ignoring")
 		except Exception:
 			logHandler.log.exception(f"{ADDON_NAME}: Error closing settings dialog in terminate")
 		
@@ -296,7 +296,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			if hasattr(self, "prefsMenu") and hasattr(self, "lionSettingsItem"):
 				self.prefsMenu.RemoveItem(self.lionSettingsItem)
 		except (wx.PyDeadObjectError, RuntimeError, AttributeError):
-			pass
+			logHandler.log.debug(f"{ADDON_NAME}: Menu item already removed or dead, ignoring")
 		except Exception:
 			logHandler.log.exception(f"{ADDON_NAME}: Error removing menu item in terminate")
 
