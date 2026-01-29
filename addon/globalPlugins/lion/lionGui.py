@@ -53,8 +53,8 @@ class frmMain(wx.Frame):
 		actionSizer.Add(self.btnClose, 0, wx.ALL, 5)
 		mainSizer.Add(actionSizer, 0, wx.ALL | wx.ALIGN_RIGHT, 5)
 
-		# Bindings
-		self.btnClose.Bind(wx.EVT_BUTTON, self.onClose)
+		# Bindings (D: button calls Close(), EVT_CLOSE handles prompts)
+		self.btnClose.Bind(wx.EVT_BUTTON, self.onCloseButton)
 
 	def _createProfilesTab(self, parent):
 		"""Create Profiles management tab with ListCtrl"""
@@ -244,9 +244,11 @@ class frmMain(wx.Frame):
 			if dlg.ShowModal() == wx.ID_OK:
 				appName = dlg.GetValue().strip()
 				if appName and appName != "global":
-					# Create empty profile (no overrides initially)
-					# Note: This will set the profile as active
-					self.backend.saveProfileForApp(appName, {})
+					# Create profile with minimal override (B: prevent empty profile normalization)
+					# Use interval + 0.1 as initial override to ensure profile persists
+					base = float(config.conf["lion"]["interval"])
+					interval = min(base + 0.1, 10.0)
+					self.backend.saveProfileForApp(appName, {"interval": interval})
 					
 					# Update UI to reflect the newly active profile
 					self.lblActiveProfile.SetLabel(_("Active Profile: ") + self.backend.currentAppProfile)
@@ -313,8 +315,10 @@ class frmMain(wx.Frame):
 				dlg.Destroy()
 				
 				if result == wx.ID_YES:
-					# Save and switch
-					self._saveSettings()
+					# Save and switch (C: block switch if save fails)
+					if not self._saveSettings():
+						# Save failed, do not switch profile
+						return
 				elif result == wx.ID_NO:
 					# Discard and switch
 					pass
@@ -337,44 +341,52 @@ class frmMain(wx.Frame):
 
 	def onSave(self, event):
 		"""Save current settings"""
-		try:
-			self._saveSettings()
-			# Only clear dirty flag if save succeeded (no exception raised)
+		if self._saveSettings():
+			# Only clear dirty flag if save succeeded
 			self._dirty = False
 			ui.message(_("Settings saved"))
-		except Exception:
-			logHandler.log.exception("LionEvolutionPro: Error saving settings")
+		else:
 			ui.message(_("Error saving settings"))
 
 	def _saveSettings(self):
-		"""Internal method to save settings"""
-		appName = self.backend.currentAppProfile
+		"""Internal method to save settings.
 		
-		currentValues = {
-			"cropLeft": int(self.spinCropLeft.GetValue()),
-			"cropRight": int(self.spinCropRight.GetValue()),
-			"cropUp": int(self.spinCropUp.GetValue()),
-			"cropDown": int(self.spinCropDown.GetValue()),
-			"target": self.choiceTarget.GetSelection(),
-			"threshold": self.spinThreshold.GetValue(),
-			"interval": self.spinInterval.GetValue()
-		}
-		
-		if appName == "global":
-			# Save directly to config.conf["lion"]
-			for key, value in currentValues.items():
-				config.conf["lion"][key] = value
-			logHandler.log.info("LionEvolutionPro: Saved global settings to config.conf")
-		else:
-			# Compute overrides (only values different from global)
-			overrides = {}
-			for key, value in currentValues.items():
-				if value != config.conf["lion"][key]:
-					overrides[key] = value
+		Returns:
+			bool: True if save succeeded, False if failed (C: return True/False)
+		"""
+		try:
+			appName = self.backend.currentAppProfile
 			
-			# Save profile with overrides
-			self.backend.saveProfileForApp(appName, overrides)
-			logHandler.log.info(f"LionEvolutionPro: Saved profile for {appName} with overrides")
+			currentValues = {
+				"cropLeft": int(self.spinCropLeft.GetValue()),
+				"cropRight": int(self.spinCropRight.GetValue()),
+				"cropUp": int(self.spinCropUp.GetValue()),
+				"cropDown": int(self.spinCropDown.GetValue()),
+				"target": self.choiceTarget.GetSelection(),
+				"threshold": self.spinThreshold.GetValue(),
+				"interval": self.spinInterval.GetValue()
+			}
+			
+			if appName == "global":
+				# Save directly to config.conf["lion"]
+				for key, value in currentValues.items():
+					config.conf["lion"][key] = value
+				logHandler.log.info("LionEvolutionPro: Saved global settings to config.conf")
+			else:
+				# Compute overrides (only values different from global)
+				overrides = {}
+				for key, value in currentValues.items():
+					if value != config.conf["lion"][key]:
+						overrides[key] = value
+				
+				# Save profile with overrides
+				self.backend.saveProfileForApp(appName, overrides)
+				logHandler.log.info(f"LionEvolutionPro: Saved profile for {appName} with overrides")
+			
+			return True
+		except Exception:
+			logHandler.log.exception("LionEvolutionPro: Error saving settings")
+			return False
 
 	def onRestoreDefaults(self, event):
 		"""Restore defaults for current profile"""
@@ -390,23 +402,35 @@ class frmMain(wx.Frame):
 				dlg.ShowModal()
 				dlg.Destroy()
 			else:
-				# For app profile: clear overrides but keep active
+				# For app profile: clear overrides and return to global (A)
 				dlg = wx.MessageDialog(self,
-					_("This will clear all overrides for this profile, making it identical to global.\nThe profile will stay active. Continue?"),
+					_("This will delete the profile and return to global settings. Continue?"),
 					_("Restore Defaults"),
 					wx.YES_NO | wx.ICON_QUESTION)
 				
 				if dlg.ShowModal() == wx.ID_YES:
+					# Clear overrides (deletes profile file)
 					self.backend.clearOverridesForApp(appName)
+					# Explicitly switch to global profile
+					self.backend.setActiveProfile("global")
+					
+					# Update UI
+					self.lblActiveProfile.SetLabel(_("Active Profile: ") + self.backend.currentAppProfile)
+					self._refreshProfileList()
 					self._refreshSettingsControls()
 					self._dirty = False
-					ui.message(_("Overrides cleared for ") + appName)
+					
+					ui.message(_("Profile deleted, switched to global"))
 				dlg.Destroy()
 		except Exception:
 			logHandler.log.exception("LionEvolutionPro: Error restoring defaults")
 
+	def onCloseButton(self, event):
+		"""Close button handler - delegates to EVT_CLOSE (D)"""
+		self.Close()
+
 	def onClose(self, event):
-		"""Handle window close with dirty check"""
+		"""Handle window close with dirty check (EVT_CLOSE handler)"""
 		try:
 			if self._dirty:
 				dlg = wx.MessageDialog(self,
@@ -418,8 +442,12 @@ class frmMain(wx.Frame):
 				dlg.Destroy()
 				
 				if result == wx.ID_YES:
-					# Save and close
-					self._saveSettings()
+					# Save and close (C: block close if save fails)
+					if not self._saveSettings():
+						# Save failed, cancel close and keep dirty flag
+						if hasattr(event, 'Veto'):
+							event.Veto()
+						return
 				elif result == wx.ID_NO:
 					# Discard and close
 					pass
