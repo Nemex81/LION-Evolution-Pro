@@ -284,10 +284,10 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 
 	def terminate(self):
 		try:
-			if hasattr(self, "settingsDialog") and self.settingsDialog:
+			if self.settingsDialog:
 				self.settingsDialog.Close()
 				self.settingsDialog = None
-		except (wx.PyDeadObjectError, RuntimeError):
+		except (wx.PyDeadObjectError, RuntimeError, AttributeError):
 			pass
 		except Exception:
 			logHandler.log.exception(f"{ADDON_NAME}: Error closing settings dialog in terminate")
@@ -314,7 +314,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 				self.settingsDialog.Show()
 				logHandler.log.info(f"{ADDON_NAME}: Raised existing settings dialog")
 				return
-			except (wx.PyDeadObjectError, RuntimeError):
+			except (wx.PyDeadObjectError, RuntimeError, AttributeError):
 				# Dialog object is dead, need to create a new one
 				logHandler.log.info(f"{ADDON_NAME}: Existing dialog is dead, creating new one")
 				self.settingsDialog = None
