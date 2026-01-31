@@ -1,0 +1,10 @@
+{
+  "python.analysis.extraPaths": [
+    "..\\nvda\\source"
+  ],
+  "python.autoComplete.extraPaths": [
+    "..\\nvda\\source"
+  ],
+  "python.analysis.diagnosticMode": "workspace",
+  "python.analysis.typeCheckingMode": "basic"
+}
