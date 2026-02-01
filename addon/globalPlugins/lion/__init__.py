@@ -462,22 +462,38 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 				nav=api.getNavigatorObject()
 			
 	def event_gainFocus(self, obj, nextHandler):
+		"""Handle focus change with OCR pause during profile switch"""
 		try:
 			# Safe access to appModule and appName
 			appMod = getattr(obj, "appModule", None)
 			newAppName = getattr(appMod, "appName", None) if appMod else None
 			
 			if newAppName and newAppName != self.currentAppProfile and newAppName != "nvda":
-				# Thread-safe profile loading
+				# Pause OCR during profile switch to prevent race condition
+				was_active = False
+				if hasattr(self, '_ocrActive'):
+					was_active = self._ocrActive.is_set()
+					if was_active:
+						self._ocrActive.clear()
+						logHandler.log.debug(f"{ADDON_NAME}: Paused OCR for profile switch to {newAppName}")
+						# Brief wait for current iteration to complete
+						time.sleep(0.3)
+				
+				# Load profile (I/O not blocking OCR anymore)
 				with self._profileLock:
 					self.loadProfileForApp(newAppName)
 				
-				# Clear anti-repeat state for the new app to avoid stale suppression
+				# Clear anti-repeat state for new app
 				with self._stateLock:
-					# Remove all keys for this app (all targets)
 					keys_to_remove = [k for k in self._ocrState.keys() if k[0] == newAppName]
 					for k in keys_to_remove:
 						del self._ocrState[k]
+				
+				# Resume OCR with new profile
+				if was_active and hasattr(self, '_ocrActive'):
+					self._ocrActive.set()
+					logHandler.log.debug(f"{ADDON_NAME}: Resumed OCR with profile {newAppName}")
+					
 		except Exception:
 			# Never crash NVDA on focus events
 			logHandler.log.exception(f"{ADDON_NAME}: event_gainFocus failed")
@@ -648,50 +664,96 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		logHandler.log.info(f"{ADDON_NAME}: OCR loop exited")
 
 	def OcrScreen(self, cfg, appName, targets):
-		"""Perform OCR scan with provided config and targets.
+		"""Perform OCR scan with robust error handling
 		
 		Args:
-			cfg: Configuration dict snapshot
+			cfg: Config dict snapshot
 			appName: Current app profile name
 			targets: Pre-computed target rectangles dict
 		"""
-		# Determine targetIndex from config snapshot
 		try:
-			targetIndex = int(cfg.get("target", config.conf["lion"]["target"]))
-		except (ValueError, TypeError, KeyError):
-			targetIndex = int(config.conf["lion"]["target"])
-		
-		# Get configured threshold from config snapshot
-		try:
-			configuredThreshold = float(cfg.get("threshold", config.conf["lion"]["threshold"]))
-		except (ValueError, TypeError, KeyError):
-			configuredThreshold = float(config.conf["lion"]["threshold"])
-		
-		# Get interval for logging
-		try:
-			interval = float(cfg.get("interval", config.conf["lion"]["interval"]))
-		except (ValueError, TypeError, KeyError):
-			interval = float(config.conf["lion"]["interval"])
-		
-		key = (appName, targetIndex)
-		
-		left, top, width, height = targets[targetIndex]
-		
-		# Debug logging (helps validate settings are applied)
-		logHandler.log.info(f"{ADDON_NAME} Scan: app={appName}, target={targetIndex}, "
-			f"rect=({left},{top},{width}x{height}), threshold={configuredThreshold:.2f}, interval={interval:.1f}")
-		
-		recog = contentRecog.uwpOcr.UwpOcr()
-
-		imgInfo = contentRecog.RecogImageInfo.createFromRecognizer(left, top, width, height, recog)
-		sb = screenBitmap.ScreenBitmap(imgInfo.recogWidth, imgInfo.recogHeight) 
-		pixels = sb.captureImage(left, top, width, height)
-		
-		# Pass key and threshold to callback via closure
-		def callback(result):
-			self._handleOcrResult(result, key, configuredThreshold)
-		
-		recog.recognize(pixels, imgInfo, callback)
+			# Parse target index from config
+			try:
+				targetIndex = int(cfg.get("target", config.conf["lion"]["target"]))
+				if targetIndex not in targets:
+					logHandler.log.error(f"{ADDON_NAME}: Invalid target index {targetIndex}, using 1")
+					targetIndex = 1
+			except (ValueError, TypeError, KeyError) as e:
+				logHandler.log.error(f"{ADDON_NAME}: Error parsing target: {e}, using 1")
+				targetIndex = 1
+			
+			# Parse threshold from config
+			try:
+				configuredThreshold = float(cfg.get("threshold", config.conf["lion"]["threshold"]))
+			except (ValueError, TypeError, KeyError):
+				configuredThreshold = float(config.conf["lion"]["threshold"])
+			
+			# Get interval for logging
+			try:
+				interval = float(cfg.get("interval", config.conf["lion"]["interval"]))
+			except (ValueError, TypeError, KeyError):
+				interval = float(config.conf["lion"]["interval"])
+			
+			key = (appName, targetIndex)
+			left, top, width, height = targets[targetIndex]
+			
+			# Validate dimensions before attempting OCR
+			MIN_OCR_SIZE = 10
+			if width < MIN_OCR_SIZE or height < MIN_OCR_SIZE:
+				logHandler.log.warning(f"{ADDON_NAME}: Target too small ({width}x{height}), skipping scan")
+				return
+			
+			# Validate coordinates are on-screen
+			screenW = ctypes.windll.user32.GetSystemMetrics(0)
+			screenH = ctypes.windll.user32.GetSystemMetrics(1)
+			if left < 0 or top < 0 or left >= screenW or top >= screenH:
+				logHandler.log.warning(f"{ADDON_NAME}: Target off-screen ({left},{top}), skipping scan")
+				return
+			
+			# Debug log (validates settings are applied correctly)
+			logHandler.log.debug(f"{ADDON_NAME} Scan: app={appName}, target={targetIndex}, "
+							   f"rect=({left},{top},{width}x{height}), threshold={configuredThreshold:.2f}, "
+							   f"interval={interval:.1f}")
+			
+			# Create OCR recognizer
+			try:
+				recog = contentRecog.uwpOcr.UwpOcr()
+			except Exception:
+				logHandler.log.exception(f"{ADDON_NAME}: Failed to create UwpOcr recognizer")
+				return
+			
+			# Create image info
+			try:
+				imgInfo = contentRecog.RecogImageInfo.createFromRecognizer(left, top, width, height, recog)
+			except Exception:
+				logHandler.log.exception(f"{ADDON_NAME}: Failed to create RecogImageInfo")
+				return
+			
+			# Capture screen bitmap
+			try:
+				sb = screenBitmap.ScreenBitmap(imgInfo.recogWidth, imgInfo.recogHeight)
+				pixels = sb.captureImage(left, top, width, height)
+			except Exception:
+				logHandler.log.exception(f"{ADDON_NAME}: Failed to capture screen bitmap")
+				return
+			
+			# Define callback with error handling
+			def callback(result):
+				try:
+					self._handleOcrResult(result, key, configuredThreshold)
+				except Exception:
+					logHandler.log.exception(f"{ADDON_NAME}: Error in OCR callback")
+			
+			# Perform OCR recognition
+			try:
+				recog.recognize(pixels, imgInfo, callback)
+			except Exception:
+				logHandler.log.exception(f"{ADDON_NAME}: OCR recognize() failed")
+				return
+				
+		except Exception:
+			# Catch-all to prevent thread crash
+			logHandler.log.exception(f"{ADDON_NAME}: Unexpected error in OcrScreen for {appName}")
 	
 	def _handleOcrResult(self, result, key, configuredThreshold):
 		"""Handle OCR result with per-key anti-repeat state and thread-safe UI access.
