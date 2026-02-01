@@ -124,14 +124,16 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		# OCR state cache limits to prevent memory leak
 		self.MAX_STATE_ENTRIES_PER_APP = 10
 		self.MAX_TOTAL_STATE_ENTRIES = 100
+		self._cleanupInProgress = threading.Lock()
+		# Cache screen dimensions (updated in __init__ and on display changes)
+		self._screenW = ctypes.windll.user32.GetSystemMetrics(0)
+		self._screenH = ctypes.windll.user32.GetSystemMetrics(1)
 		# Initialize to global profile (no overrides)
 		self.loadGlobalProfile()
 		# Initialize last-valid targets to CROPPED screen (not raw)
 		# Use default/global config for initial crop (safe copy)
 		defaultCfg = {k: config.conf["lion"][k] for k in config.conf["lion"]}
-		screenRaw = locationHelper.RectLTWH(0, 0, 
-			ctypes.windll.user32.GetSystemMetrics(0), 
-			ctypes.windll.user32.GetSystemMetrics(1))
+		screenRaw = locationHelper.RectLTWH(0, 0, self._screenW, self._screenH)
 		# Apply crop with default config
 		screenRect = self.cropRectLTWH(screenRaw, defaultCfg)
 		self._lastTargets = {0: screenRect, 1: screenRect, 2: screenRect, 3: screenRect}
@@ -358,34 +360,43 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		logHandler.log.info(f"{ADDON_NAME}: Profile {appName} is now active with no overrides (same as global)")
 	
 	def _cleanOcrStateCache(self):
-		"""Periodic cleanup of OCR state cache to prevent memory leak
+		"""Cleanup OCR state cache to prevent memory leak.
 		
-		Called when total entries exceed limit. Keeps only recent entries per app.
+		Checks if total entries exceed limit, and if so, keeps only recent entries per app.
+		This method is thread-safe and can be called from any thread.
 		"""
-		with self._stateLock:
-			total = len(self._ocrState)
-			
-			if total <= self.MAX_TOTAL_STATE_ENTRIES:
-				return  # No cleanup needed
-			
-			logHandler.log.info(f"{ADDON_NAME}: Cleaning OCR state cache ({total} entries)")
-			
-			# Group entries by app
-			entries_by_app = {}
-			for key, value in self._ocrState.items():
-				app = key[0]  # key is (appName, targetIndex)
-				entries_by_app.setdefault(app, []).append((key, value))
-			
-			# Keep only most recent entries per app
-			self._ocrState.clear()
-			kept = 0
-			for app, entries in entries_by_app.items():
-				# Keep last N entries for this app
-				for key, value in entries[-self.MAX_STATE_ENTRIES_PER_APP:]:
-					self._ocrState[key] = value
-					kept += 1
-			
-			logHandler.log.info(f"{ADDON_NAME}: OCR state cleaned: {total} -> {kept} entries")
+		# Prevent multiple concurrent cleanup operations
+		if not self._cleanupInProgress.acquire(blocking=False):
+			logHandler.log.debug(f"{ADDON_NAME}: Cleanup already in progress, skipping")
+			return
+		
+		try:
+			with self._stateLock:
+				total = len(self._ocrState)
+				
+				if total <= self.MAX_TOTAL_STATE_ENTRIES:
+					return  # No cleanup needed
+				
+				logHandler.log.info(f"{ADDON_NAME}: Cleaning OCR state cache ({total} entries)")
+				
+				# Group entries by app
+				entries_by_app = {}
+				for key, value in self._ocrState.items():
+					app = key[0]  # key is (appName, targetIndex)
+					entries_by_app.setdefault(app, []).append((key, value))
+				
+				# Keep only most recent entries per app
+				self._ocrState.clear()
+				kept = 0
+				for app, entries in entries_by_app.items():
+					# Keep last N entries for this app
+					for key, value in entries[-self.MAX_STATE_ENTRIES_PER_APP:]:
+						self._ocrState[key] = value
+						kept += 1
+				
+				logHandler.log.info(f"{ADDON_NAME}: OCR state cleaned: {total} -> {kept} entries")
+		finally:
+			self._cleanupInProgress.release()
 		
 	def createMenu(self):
 		try:
@@ -504,13 +515,14 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			if newAppName and newAppName != self.currentAppProfile and newAppName != "nvda":
 				# Pause OCR during profile switch to prevent race condition
 				was_active = False
-				if hasattr(self, '_ocrActive'):
+				if hasattr(self, '_ocrActive') and hasattr(self, '_ocrThread'):
 					was_active = self._ocrActive.is_set()
 					if was_active:
 						self._ocrActive.clear()
 						logHandler.log.debug(f"{ADDON_NAME}: Paused OCR for profile switch to {newAppName}")
-						# Brief wait for current iteration to complete
-						time.sleep(0.3)
+						# Wait for current OCR iteration to complete
+						if self._ocrThread and self._ocrThread.is_alive():
+							self._ocrThread.join(timeout=0.3)
 				
 				# Load profile (I/O not blocking OCR anymore)
 				with self._profileLock:
@@ -572,9 +584,9 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		newWidth = int(r.width - (r.width * cRight / 100.0))
 		newHeight = int(r.height - (r.height * cDown / 100.0))
 		
-		# Get screen dimensions for validation
-		screenW = ctypes.windll.user32.GetSystemMetrics(0)
-		screenH = ctypes.windll.user32.GetSystemMetrics(1)
+		# Use cached screen dimensions
+		screenW = self._screenW
+		screenH = self._screenH
 		
 		# Clamp coordinates to screen bounds
 		newX = max(0, min(newX, screenW - 10))
@@ -736,10 +748,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 				logHandler.log.warning(f"{ADDON_NAME}: Target too small ({width}x{height}), skipping scan")
 				return
 			
-			# Validate coordinates are on-screen
-			screenW = ctypes.windll.user32.GetSystemMetrics(0)
-			screenH = ctypes.windll.user32.GetSystemMetrics(1)
-			if left < 0 or top < 0 or left >= screenW or top >= screenH:
+			# Validate coordinates are on-screen (use cached screen dimensions)
+			if left < 0 or top < 0 or left >= self._screenW or top >= self._screenH:
 				logHandler.log.warning(f"{ADDON_NAME}: Target off-screen ({left},{top}), skipping scan")
 				return
 			
@@ -806,7 +816,6 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		
 		# Thread-safe state access - compute decision under lock
 		shouldSpeak = False
-		textToSpeak = ""
 		with self._stateLock:
 			# Get or create state for this key
 			state = self._ocrState.setdefault(key, {"prevString": ""})
@@ -818,13 +827,12 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			# Determine if we should speak
 			if ratio < configuredThreshold and info.text != "" and info.text != "Play":
 				shouldSpeak = True
-				textToSpeak = info.text
 				# Update state for this key
 				state["prevString"] = info.text
 		
 		# Thread-safe UI call: schedule on event queue
 		if shouldSpeak:
-			queueHandler.queueFunction(queueHandler.eventQueue, ui.message, textToSpeak)
+			queueHandler.queueFunction(queueHandler.eventQueue, ui.message, info.text)
 
 	__gestures={
 		"kb:nvda+alt+l":"ReadLiveOcr"
