@@ -121,6 +121,9 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		self._ocrThread = None
 		self._ocrActive = threading.Event()
 		self._ocrLock = threading.Lock()
+		# OCR state cache limits to prevent memory leak
+		self.MAX_STATE_ENTRIES_PER_APP = 10
+		self.MAX_TOTAL_STATE_ENTRIES = 100
 		# Initialize to global profile (no overrides)
 		self.loadGlobalProfile()
 		# Initialize last-valid targets to CROPPED screen (not raw)
@@ -353,6 +356,36 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		self.currentAppProfile = appName
 		self.currentProfileData = {}
 		logHandler.log.info(f"{ADDON_NAME}: Profile {appName} is now active with no overrides (same as global)")
+	
+	def _cleanOcrStateCache(self):
+		"""Periodic cleanup of OCR state cache to prevent memory leak
+		
+		Called when total entries exceed limit. Keeps only recent entries per app.
+		"""
+		with self._stateLock:
+			total = len(self._ocrState)
+			
+			if total <= self.MAX_TOTAL_STATE_ENTRIES:
+				return  # No cleanup needed
+			
+			logHandler.log.info(f"{ADDON_NAME}: Cleaning OCR state cache ({total} entries)")
+			
+			# Group entries by app
+			entries_by_app = {}
+			for key, value in self._ocrState.items():
+				app = key[0]  # key is (appName, targetIndex)
+				entries_by_app.setdefault(app, []).append((key, value))
+			
+			# Keep only most recent entries per app
+			self._ocrState.clear()
+			kept = 0
+			for app, entries in entries_by_app.items():
+				# Keep last N entries for this app
+				for key, value in entries[-self.MAX_STATE_ENTRIES_PER_APP:]:
+					self._ocrState[key] = value
+					kept += 1
+			
+			logHandler.log.info(f"{ADDON_NAME}: OCR state cleaned: {total} -> {kept} entries")
 		
 	def createMenu(self):
 		try:
@@ -763,6 +796,11 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			key: (appName, targetIndex) tuple for state tracking
 			configuredThreshold: similarity threshold for this scan
 		"""
+		# Periodic cache cleanup check
+		if len(self._ocrState) > self.MAX_TOTAL_STATE_ENTRIES:
+			# Schedule cleanup on separate thread to avoid blocking
+			threading.Thread(target=self._cleanOcrStateCache, daemon=True).start()
+		
 		o = type('NVDAObjects.NVDAObject', (), {})()
 		info = result.makeTextInfo(o, textInfos.POSITION_ALL)
 		
