@@ -814,8 +814,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		if should_cleanup:
 			threading.Thread(target=self._cleanOcrStateCache, daemon=True).start()
 		
-		o = type('NVDAObjects.NVDAObject', (), {})()
-		info = result.makeTextInfo(o, textInfos.POSITION_ALL)
+		info = result.makeTextInfo(textInfos.POSITION_ALL)
 		
 		# Thread-safe state access - compute decision under lock
 		shouldSpeak = False
