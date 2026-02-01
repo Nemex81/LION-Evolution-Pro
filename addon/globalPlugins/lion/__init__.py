@@ -615,6 +615,36 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		
 		return targets
 	
+	def _cleanOcrStateCache(self):
+		"""Periodic cleanup of OCR state cache to prevent memory leak
+		
+		Called when total entries exceed limit. Keeps only recent entries per app.
+		"""
+		with self._stateLock:
+			total = len(self._ocrState)
+			
+			if total <= self.MAX_TOTAL_STATE_ENTRIES:
+				return  # No cleanup needed
+			
+			logHandler.log.info(f"{ADDON_NAME}: Cleaning OCR state cache ({total} entries)")
+			
+			# Group entries by app
+			entries_by_app = {}
+			for key, value in self._ocrState.items():
+				app = key[0]  # key is (appName, targetIndex)
+				entries_by_app.setdefault(app, []).append((key, value))
+			
+			# Keep only most recent entries per app
+			self._ocrState.clear()
+			kept = 0
+			for app, entries in entries_by_app.items():
+				# Keep last N entries for this app
+				for key, value in entries[-self.MAX_STATE_ENTRIES_PER_APP:]:
+					self._ocrState[key] = value
+					kept += 1
+			
+			logHandler.log.info(f"{ADDON_NAME}: OCR state cleaned: {total} -> {kept} entries")
+	
 	def ocrLoop(self):
 		"""Main OCR loop with exception handling"""
 		logHandler.log.info(f"{ADDON_NAME}: OCR loop starting")
@@ -763,6 +793,11 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			key: (appName, targetIndex) tuple for state tracking
 			configuredThreshold: similarity threshold for this scan
 		"""
+		# Periodic cache cleanup (memory leak prevention)
+		if len(self._ocrState) > self.MAX_TOTAL_STATE_ENTRIES:
+			# Schedule cleanup on separate thread to avoid blocking
+			threading.Thread(target=self._cleanOcrStateCache, daemon=True).start()
+		
 		o = type('NVDAObjects.NVDAObject', (), {})()
 		info = result.makeTextInfo(o, textInfos.POSITION_ALL)
 		
