@@ -367,6 +367,22 @@ class frmMain(wx.Frame):
 				"interval": self.spinInterval.GetValue()
 			}
 			
+			# ============ ADD THIS VALIDATION BLOCK ============
+			# Validate horizontal crop total
+			if (currentValues["cropLeft"] + currentValues["cropRight"]) >= 100:
+				ui.message(_("Error: Total horizontal crop (Left + Right) cannot be 100% or more"))
+				logHandler.log.warning(f"LionEvolutionPro: Invalid horizontal crop: "
+					f"{currentValues['cropLeft']}+{currentValues['cropRight']}")
+				return False
+			
+			# Validate vertical crop total
+			if (currentValues["cropUp"] + currentValues["cropDown"]) >= 100:
+				ui.message(_("Error: Total vertical crop (Up + Down) cannot be 100% or more"))
+				logHandler.log.warning(f"LionEvolutionPro: Invalid vertical crop: "
+					f"{currentValues['cropUp']}+{currentValues['cropDown']}")
+				return False
+			# ===================================================
+			
 			if appName == "global":
 				# Save directly to config.conf["lion"]
 				for key, value in currentValues.items():
