@@ -75,7 +75,6 @@ import globalVars
 
 
 addonHandler.initTranslation()
-active=False
 
 ADDON_NAME = "LionEvolutionPro"
 PROFILES_DIR = os.path.join(globalVars.appArgs.configPath, "addons", ADDON_NAME, "profiles")
@@ -117,7 +116,15 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		self.settingsDialog = None
 		self._stateLock = threading.Lock()
 		self._ocrState = {}
+		self._cleanupInProgress = False  # Prevent race condition in cache cleanup
 		self._profileLock = threading.Lock()
+		# OCR thread lifecycle management
+		self._ocrThread = None
+		self._ocrActive = threading.Event()  # Thread-safe control flag
+		self._ocrLock = threading.Lock()  # Prevent duplicate starts
+		# OCR state cache limits to prevent memory leak
+		self.MAX_STATE_ENTRIES_PER_APP = 10
+		self.MAX_TOTAL_STATE_ENTRIES = 100
 		# Initialize to global profile (no overrides)
 		self.loadGlobalProfile()
 		# Initialize last-valid targets to CROPPED screen (not raw)
@@ -364,6 +371,16 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			logHandler.log.exception(f"{ADDON_NAME}: Error in createMenu")
 
 	def terminate(self):
+		# Stop OCR thread first if it's running
+		if hasattr(self, '_ocrActive') and hasattr(self, '_ocrThread'):
+			if self._ocrThread and self._ocrThread.is_alive():
+				logHandler.log.info(f"{ADDON_NAME}: Stopping OCR thread in terminate()")
+				self._ocrActive.clear()
+				self._ocrThread.join(timeout=3.0)
+				if self._ocrThread.is_alive():
+					logHandler.log.warning(f"{ADDON_NAME}: OCR thread did not stop in terminate()")
+		
+		# Clean up UI components
 		try:
 			if self.settingsDialog:
 				self.settingsDialog.Close()
@@ -414,42 +431,72 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			ui.message(_("Error opening settings"))
 
 	def script_ReadLiveOcr(self, gesture):
+		"""Toggle OCR with robust thread management"""
 		repeat = getLastScriptRepeatCount()
 #		if repeat>=2:
 #			ui.message("o sa vine profile")
-		global active
 		
-		if(active==False):
-			active=True
-			tones.beep(444,333)
-			ui.message(_("lion started"))
-			nav=api.getNavigatorObject()
-
-			threading.Thread(target=self.ocrLoop).start()
+		with self._ocrLock:
+			if self._ocrThread and self._ocrThread.is_alive():
+				# Stop existing thread
+				self._ocrActive.clear()
+				logHandler.log.info(f"{ADDON_NAME}: Stopping OCR thread...")
 		
-		else:
-			
-			active=False
-			tones.beep(222,333)
-			ui.message(("lion stopped"))
+		# Wait outside lock to allow thread to finish
+		if self._ocrThread and self._ocrThread.is_alive():
+			self._ocrThread.join(timeout=2.0)
+			if self._ocrThread.is_alive():
+				logHandler.log.warning(f"{ADDON_NAME}: OCR thread did not stop gracefully")
+		
+		with self._ocrLock:
+			if self._ocrThread and self._ocrThread.is_alive():
+				# Still alive - user is stopping
+				tones.beep(222, 333)
+				queueHandler.queueFunction(queueHandler.eventQueue, ui.message, _("lion stopped"))
+				self._ocrThread = None
+			else:
+				# Start new thread
+				self._ocrActive.set()
+				self._ocrThread = threading.Thread(target=self.ocrLoop, daemon=True)
+				self._ocrThread.start()
+				tones.beep(444, 333)
+				queueHandler.queueFunction(queueHandler.eventQueue, ui.message, _("lion started"))
+				logHandler.log.info(f"{ADDON_NAME}: OCR thread started")
 			
 	def event_gainFocus(self, obj, nextHandler):
+		"""Handle focus change with OCR pause during profile switch"""
 		try:
 			# Safe access to appModule and appName
 			appMod = getattr(obj, "appModule", None)
 			newAppName = getattr(appMod, "appName", None) if appMod else None
 			
 			if newAppName and newAppName != self.currentAppProfile and newAppName != "nvda":
-				# Thread-safe profile loading
+				# Pause OCR during profile switch to prevent race condition
+				was_active = False
+				if hasattr(self, '_ocrActive'):
+					was_active = self._ocrActive.is_set()
+					if was_active:
+						self._ocrActive.clear()
+						logHandler.log.debug(f"{ADDON_NAME}: Paused OCR for profile switch to {newAppName}")
+						# Brief wait for current iteration to complete
+						time.sleep(0.3)
+				
+				# Load profile (I/O not blocking OCR anymore)
 				with self._profileLock:
 					self.loadProfileForApp(newAppName)
 				
-				# Clear anti-repeat state for the new app to avoid stale suppression
+				# Clear anti-repeat state for new app to avoid stale suppression
 				with self._stateLock:
 					# Remove all keys for this app (all targets)
 					keys_to_remove = [k for k in self._ocrState.keys() if k[0] == newAppName]
 					for k in keys_to_remove:
 						del self._ocrState[k]
+				
+				# Resume OCR with new profile
+				if was_active and hasattr(self, '_ocrActive'):
+					self._ocrActive.set()
+					logHandler.log.debug(f"{ADDON_NAME}: Resumed OCR with profile {newAppName}")
+					
 		except Exception:
 			# Never crash NVDA on focus events
 			logHandler.log.exception(f"{ADDON_NAME}: event_gainFocus failed")
@@ -458,30 +505,60 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			nextHandler()
 
 	def cropRectLTWH(self, r, cfg):
-		"""Crop rectangle using config. Pure function (no self state access).
-		Uses upstream LION-compatible crop semantics.
-		"""
-		if r is None: return locationHelper.RectLTWH(0,0,0,0)
+		"""Crop rectangle with comprehensive validation.
 		
+		Args:
+			r: Original rectangle (RectLTWH)
+			cfg: Config dict with cropLeft/Right/Up/Down percentages
+		
+		Returns:
+			RectLTWH: Validated cropped rectangle (minimum 10x10 pixels)
+		"""
+		if r is None:
+			logHandler.log.warning(f"{ADDON_NAME}: cropRectLTWH received None rect")
+			return locationHelper.RectLTWH(0, 0, 10, 10)
+		
+		# Parse and clamp crop percentages to [0, 100]
 		try:
-			cLeft = int(cfg.get("cropLeft", 0))
-			cUp = int(cfg.get("cropUp", 0))
-			cRight = int(cfg.get("cropRight", 0))
-			cDown = int(cfg.get("cropDown", 0))
-		except (ValueError, TypeError):
+			cLeft = max(0, min(100, int(cfg.get("cropLeft", 0))))
+			cUp = max(0, min(100, int(cfg.get("cropUp", 0))))
+			cRight = max(0, min(100, int(cfg.get("cropRight", 0))))
+			cDown = max(0, min(100, int(cfg.get("cropDown", 0))))
+		except (ValueError, TypeError) as e:
+			logHandler.log.error(f"{ADDON_NAME}: Invalid crop values in config: {e}")
 			cLeft, cUp, cRight, cDown = 0, 0, 0, 0
 		
-		# Upstream LION-compatible formula
-		# Left/Top: (original + size) * percentage
-		# Width/Height: original size - (size * right/down percentage)
+		# Validate: total crop cannot exceed 100% on any axis
+		if (cLeft + cRight) >= 100:
+			logHandler.log.warning(f"{ADDON_NAME}: Horizontal crop {cLeft}+{cRight}>=100%, using original")
+			cLeft, cRight = 0, 0
+		if (cUp + cDown) >= 100:
+			logHandler.log.warning(f"{ADDON_NAME}: Vertical crop {cUp}+{cDown}>=100%, using original")
+			cUp, cDown = 0, 0
+		
+		# Calculate cropped rectangle (upstream LION formula)
 		newX = int((r.left + r.width) * cLeft / 100.0)
 		newY = int((r.top + r.height) * cUp / 100.0)
 		newWidth = int(r.width - (r.width * cRight / 100.0))
 		newHeight = int(r.height - (r.height * cDown / 100.0))
 		
-		# Safety check to avoid negative or zero dimensions causing OCR crash
-		if newWidth <= 0: newWidth = 1
-		if newHeight <= 0: newHeight = 1
+		# Get screen dimensions for validation
+		screenW = ctypes.windll.user32.GetSystemMetrics(0)
+		screenH = ctypes.windll.user32.GetSystemMetrics(1)
+		
+		# Clamp coordinates to screen bounds
+		newX = max(0, min(newX, screenW - 10))
+		newY = max(0, min(newY, screenH - 10))
+		
+		# Ensure minimum viable dimensions for OCR (10x10 minimum)
+		MIN_OCR_SIZE = 10
+		newWidth = max(MIN_OCR_SIZE, min(newWidth, screenW - newX))
+		newHeight = max(MIN_OCR_SIZE, min(newHeight, screenH - newY))
+		
+		# Final validation
+		if newWidth < MIN_OCR_SIZE or newHeight < MIN_OCR_SIZE:
+			logHandler.log.error(f"{ADDON_NAME}: Cropped rect too small ({newWidth}x{newHeight}), using fallback")
+			return locationHelper.RectLTWH(0, 0, min(100, screenW), min(100, screenH))
 		
 		return locationHelper.RectLTWH(newX, newY, newWidth, newHeight)
 	
@@ -542,72 +619,181 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		return targets
 	
 	def ocrLoop(self):
-		global active
+		"""Main OCR loop with exception handling"""
+		logHandler.log.info(f"{ADDON_NAME}: OCR loop starting")
+		consecutive_errors = 0
+		max_consecutive_errors = 5
 		
-		while(active==True ):
-			# Snapshot effective config once per scan (thread-safe)
-			with self._profileLock:
-				appName = self.currentAppProfile
-				cfg = self.getEffectiveConfig(appName)
-			
-			# Rebuild targets with this config snapshot
-			targets = self.rebuildTargets(cfg)
-			
-			# Perform OCR with consistent config and targets
-			self.OcrScreen(cfg, appName, targets)
-			
-			# Use interval from same config snapshot
+		while self._ocrActive.is_set():
 			try:
-				interval = float(cfg.get("interval", config.conf["lion"]["interval"]))
-			except (ValueError, TypeError, KeyError):
-				interval = float(config.conf["lion"]["interval"])
-			time.sleep(interval)
+				# Snapshot config once per iteration
+				with self._profileLock:
+					appName = self.currentAppProfile
+					cfg = self.getEffectiveConfig(appName)
+				
+				# Rebuild targets with current config
+				targets = self.rebuildTargets(cfg)
+				
+				# Perform OCR scan
+				self.OcrScreen(cfg, appName, targets)
+				
+				# Reset error counter on success
+				consecutive_errors = 0
+				
+				# Use config snapshot for interval
+				try:
+					interval = float(cfg.get("interval", config.conf["lion"]["interval"]))
+				except (ValueError, TypeError, KeyError):
+					interval = float(config.conf["lion"]["interval"])
+				
+				# Use wait() instead of sleep() for immediate response to stop
+				self._ocrActive.wait(timeout=interval)
+				
+			except Exception:
+				consecutive_errors += 1
+				logHandler.log.exception(f"{ADDON_NAME}: Error in ocrLoop (attempt {consecutive_errors}/{max_consecutive_errors})")
+				
+				if consecutive_errors >= max_consecutive_errors:
+					logHandler.log.error(f"{ADDON_NAME}: Too many consecutive errors, stopping OCR")
+					self._ocrActive.clear()
+					queueHandler.queueFunction(queueHandler.eventQueue, ui.message, 
+						_("OCR stopped due to errors"))
+					break
+				
+				# Exponential backoff on errors
+				backoff = min(5.0, 0.5 * (2 ** consecutive_errors))
+				self._ocrActive.wait(timeout=backoff)
+		
+		logHandler.log.info(f"{ADDON_NAME}: OCR loop exited")
 
 	def OcrScreen(self, cfg, appName, targets):
-		"""Perform OCR scan with provided config and targets.
+		"""Perform OCR scan with robust error handling.
 		
 		Args:
 			cfg: Configuration dict snapshot
 			appName: Current app profile name
 			targets: Pre-computed target rectangles dict
 		"""
-		# Determine targetIndex from config snapshot
 		try:
-			targetIndex = int(cfg.get("target", config.conf["lion"]["target"]))
-		except (ValueError, TypeError, KeyError):
-			targetIndex = int(config.conf["lion"]["target"])
+			# Parse target index from config
+			try:
+				targetIndex = int(cfg.get("target", config.conf["lion"]["target"]))
+				if targetIndex not in targets:
+					logHandler.log.error(f"{ADDON_NAME}: Invalid target index {targetIndex}, using 1")
+					targetIndex = 1
+			except (ValueError, TypeError, KeyError) as e:
+				logHandler.log.error(f"{ADDON_NAME}: Error parsing target: {e}, using 1")
+				targetIndex = 1
+			
+			# Parse threshold from config
+			try:
+				configuredThreshold = float(cfg.get("threshold", config.conf["lion"]["threshold"]))
+			except (ValueError, TypeError, KeyError):
+				configuredThreshold = float(config.conf["lion"]["threshold"])
+			
+			# Get interval for logging
+			try:
+				interval = float(cfg.get("interval", config.conf["lion"]["interval"]))
+			except (ValueError, TypeError, KeyError):
+				interval = float(config.conf["lion"]["interval"])
+			
+			key = (appName, targetIndex)
+			left, top, width, height = targets[targetIndex]
+			
+			# Validate dimensions before attempting OCR
+			MIN_OCR_SIZE = 10
+			if width < MIN_OCR_SIZE or height < MIN_OCR_SIZE:
+				logHandler.log.warning(f"{ADDON_NAME}: Target too small ({width}x{height}), skipping scan")
+				return
+			
+			# Validate coordinates are on-screen
+			screenW = ctypes.windll.user32.GetSystemMetrics(0)
+			screenH = ctypes.windll.user32.GetSystemMetrics(1)
+			if left < 0 or top < 0 or left >= screenW or top >= screenH:
+				logHandler.log.warning(f"{ADDON_NAME}: Target off-screen ({left},{top}), skipping scan")
+				return
+			
+			# Debug log (validates settings are applied correctly)
+			logHandler.log.debug(f"{ADDON_NAME} Scan: app={appName}, target={targetIndex}, "
+				f"rect=({left},{top},{width}x{height}), threshold={configuredThreshold:.2f}, "
+				f"interval={interval:.1f}")
+			
+			# Create OCR recognizer
+			try:
+				recog = contentRecog.uwpOcr.UwpOcr()
+			except Exception:
+				logHandler.log.exception(f"{ADDON_NAME}: Failed to create UwpOcr recognizer")
+				return
+			
+			# Create image info
+			try:
+				imgInfo = contentRecog.RecogImageInfo.createFromRecognizer(left, top, width, height, recog)
+			except Exception:
+				logHandler.log.exception(f"{ADDON_NAME}: Failed to create RecogImageInfo")
+				return
+			
+			# Capture screen bitmap
+			try:
+				sb = screenBitmap.ScreenBitmap(imgInfo.recogWidth, imgInfo.recogHeight)
+				pixels = sb.captureImage(left, top, width, height)
+			except Exception:
+				logHandler.log.exception(f"{ADDON_NAME}: Failed to capture screen bitmap")
+				return
+			
+			# Define callback with error handling
+			def callback(result):
+				try:
+					self._handleOcrResult(result, key, configuredThreshold)
+				except Exception:
+					logHandler.log.exception(f"{ADDON_NAME}: Error in OCR callback")
+			
+			# Perform OCR recognition
+			try:
+				recog.recognize(pixels, imgInfo, callback)
+			except Exception:
+				logHandler.log.exception(f"{ADDON_NAME}: OCR recognize() failed")
+				return
+				
+		except Exception:
+			# Catch-all to prevent thread crash
+			logHandler.log.exception(f"{ADDON_NAME}: Unexpected error in OcrScreen for {appName}")
+	
+	def _cleanOcrStateCache(self):
+		"""Periodic cleanup of OCR state cache to prevent memory leak.
 		
-		# Get configured threshold from config snapshot
+		Called when total entries exceed limit. Keeps only recent entries per app.
+		"""
 		try:
-			configuredThreshold = float(cfg.get("threshold", config.conf["lion"]["threshold"]))
-		except (ValueError, TypeError, KeyError):
-			configuredThreshold = float(config.conf["lion"]["threshold"])
-		
-		# Get interval for logging
-		try:
-			interval = float(cfg.get("interval", config.conf["lion"]["interval"]))
-		except (ValueError, TypeError, KeyError):
-			interval = float(config.conf["lion"]["interval"])
-		
-		key = (appName, targetIndex)
-		
-		left, top, width, height = targets[targetIndex]
-		
-		# Debug logging (helps validate settings are applied)
-		logHandler.log.info(f"{ADDON_NAME} Scan: app={appName}, target={targetIndex}, "
-			f"rect=({left},{top},{width}x{height}), threshold={configuredThreshold:.2f}, interval={interval:.1f}")
-		
-		recog = contentRecog.uwpOcr.UwpOcr()
-
-		imgInfo = contentRecog.RecogImageInfo.createFromRecognizer(left, top, width, height, recog)
-		sb = screenBitmap.ScreenBitmap(imgInfo.recogWidth, imgInfo.recogHeight) 
-		pixels = sb.captureImage(left, top, width, height)
-		
-		# Pass key and threshold to callback via closure
-		def callback(result):
-			self._handleOcrResult(result, key, configuredThreshold)
-		
-		recog.recognize(pixels, imgInfo, callback)
+			with self._stateLock:
+				total = len(self._ocrState)
+				
+				if total <= self.MAX_TOTAL_STATE_ENTRIES:
+					return  # No cleanup needed
+				
+				logHandler.log.info(f"{ADDON_NAME}: Cleaning OCR state cache ({total} entries)")
+				
+				# Group entries by app
+				entries_by_app = {}
+				for key, value in self._ocrState.items():
+					app = key[0]  # key is (appName, targetIndex)
+					entries_by_app.setdefault(app, []).append((key, value))
+				
+				# Keep only most recent entries per app
+				self._ocrState.clear()
+				kept = 0
+				for app, entries in entries_by_app.items():
+					# Keep last N entries for this app
+					for key, value in entries[-self.MAX_STATE_ENTRIES_PER_APP:]:
+						self._ocrState[key] = value
+						kept += 1
+				
+				logHandler.log.info(f"{ADDON_NAME}: OCR state cleaned: {total} -> {kept} entries")
+		except Exception:
+			logHandler.log.exception(f"{ADDON_NAME}: Error during cache cleanup")
+		finally:
+			# CRITICAL: Reset flag to allow future cleanups
+			with self._stateLock:
+				self._cleanupInProgress = False
 	
 	def _handleOcrResult(self, result, key, configuredThreshold):
 		"""Handle OCR result with per-key anti-repeat state.
@@ -617,11 +803,23 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			key: (appName, targetIndex) tuple for state tracking
 			configuredThreshold: similarity threshold for this scan
 		"""
+		# Trigger cleanup with race condition protection
+		should_cleanup = False
+		with self._stateLock:
+			if (len(self._ocrState) > self.MAX_TOTAL_STATE_ENTRIES 
+				and not self._cleanupInProgress):
+				self._cleanupInProgress = True
+				should_cleanup = True
+		
+		if should_cleanup:
+			threading.Thread(target=self._cleanOcrStateCache, daemon=True).start()
+		
 		o = type('NVDAObjects.NVDAObject', (), {})()
 		info = result.makeTextInfo(o, textInfos.POSITION_ALL)
 		
 		# Thread-safe state access - compute decision under lock
 		shouldSpeak = False
+		textToSpeak = ""
 		with self._stateLock:
 			# Get or create state for this key
 			state = self._ocrState.setdefault(key, {"prevString": ""})
@@ -633,12 +831,13 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			# Determine if we should speak
 			if ratio < configuredThreshold and info.text != "" and info.text != "Play":
 				shouldSpeak = True
+				textToSpeak = info.text
 				# Update state for this key
 				state["prevString"] = info.text
 		
-		# Speak outside of lock to avoid blocking
+		# Thread-safe UI call: schedule on event queue instead of calling directly
 		if shouldSpeak:
-			ui.message(info.text)
+			queueHandler.queueFunction(queueHandler.eventQueue, ui.message, textToSpeak)
 
 	__gestures={
 		"kb:nvda+alt+l":"ReadLiveOcr"
