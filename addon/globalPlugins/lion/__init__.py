@@ -814,7 +814,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		if should_cleanup:
 			threading.Thread(target=self._cleanOcrStateCache, daemon=True).start()
 		
-		info = result.makeTextInfo(textInfos.POSITION_ALL)
+		# ✅ FIX v2: Access text attribute directly (no need for makeTextInfo)
+		text = result.text
 		
 		# Thread-safe state access - compute decision under lock
 		shouldSpeak = False
@@ -825,14 +826,14 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			prevString = state["prevString"]
 			
 			# Compute similarity ratio
-			ratio = SequenceMatcher(None, prevString, info.text).ratio()
+			ratio = SequenceMatcher(None, prevString, text).ratio()
 			
 			# Determine if we should speak
-			if ratio < configuredThreshold and info.text != "" and info.text != "Play":
+			if ratio < configuredThreshold and text != "" and text != "Play":
 				shouldSpeak = True
-				textToSpeak = info.text
+				textToSpeak = text
 				# Update state for this key
-				state["prevString"] = info.text
+				state["prevString"] = text
 		
 		# Thread-safe UI call: schedule on event queue instead of calling directly
 		if shouldSpeak:
