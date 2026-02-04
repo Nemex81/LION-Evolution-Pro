@@ -105,14 +105,17 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 	Maintains upstream compatibility when no profile exists.
 	"""
 
-	currentAppProfile = "global"
-	currentProfileData = {}
-	
 	user32 = ctypes.windll.user32
 	resX, resY= user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)
 	
 	def __init__(self):
 		super(GlobalPlugin, self).__init__()
+		# Instance variables for current profile state (moved from class-level globals)
+		self.currentAppProfile = "global"
+		self.currentProfileData = {}
+		# Profiles cache to avoid disk I/O on every app switch
+		self.profilesCache = {}
+		
 		self.settingsDialog = None
 		self._stateLock = threading.Lock()
 		self._ocrState = {}
@@ -125,6 +128,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		# OCR state cache limits to prevent memory leak
 		self.MAX_STATE_ENTRIES_PER_APP = 10
 		self.MAX_TOTAL_STATE_ENTRIES = 100
+		# Pre-load all profiles into cache at startup
+		self.loadAllProfilesToCache()
 		# Initialize to global profile (no overrides)
 		self.loadGlobalProfile()
 		# Initialize last-valid targets to CROPPED screen (not raw)
@@ -144,6 +149,65 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 	def getProfilePath(self, appName):
 		safeName = "".join(x for x in appName if x.isalnum() or x in "-_")
 		return os.path.join(PROFILES_DIR, f"{safeName}.json")
+	
+	def loadAllProfilesToCache(self):
+		"""Pre-load all profiles from disk into memory cache at startup.
+		
+		Scans PROFILES_DIR and loads each JSON profile file.
+		Invalid JSON files are logged and skipped.
+		"""
+		self.profilesCache = {}
+		
+		if not os.path.exists(PROFILES_DIR):
+			logHandler.log.info(f"{ADDON_NAME}: Profiles directory does not exist, cache is empty")
+			return
+		
+		try:
+			for filename in os.listdir(PROFILES_DIR):
+				if filename.endswith('.json'):
+					profileName = filename[:-5]  # Remove .json extension
+					filePath = os.path.join(PROFILES_DIR, filename)
+					try:
+						with open(filePath, "r", encoding="utf-8") as f:
+							rawData = json.load(f)
+						# Normalize to overrides-only format
+						normalizedData = self._normalizeProfileToOverrides(rawData)
+						self.profilesCache[profileName] = normalizedData
+						logHandler.log.debug(f"{ADDON_NAME}: Loaded profile '{profileName}' into cache")
+					except json.JSONDecodeError as e:
+						logHandler.log.warning(f"{ADDON_NAME}: Invalid JSON in profile '{profileName}', skipping: {e}")
+					except (OSError, IOError) as e:
+						logHandler.log.warning(f"{ADDON_NAME}: Failed to read profile '{profileName}', skipping: {e}")
+			
+			logHandler.log.info(f"{ADDON_NAME}: Loaded {len(self.profilesCache)} profiles into cache")
+		except (OSError, IOError) as e:
+			logHandler.log.error(f"{ADDON_NAME}: Failed to scan profiles directory: {e}")
+	
+	def refreshProfileCache(self, appName):
+		"""Refresh a single profile in the cache from disk.
+		
+		Called after saving a profile to keep cache in sync.
+		
+		Args:
+			appName: Application name whose profile to refresh
+		"""
+		if appName == "global":
+			return  # Global is not a file-based profile
+		
+		path = self.getProfilePath(appName)
+		if os.path.exists(path):
+			try:
+				with open(path, "r", encoding="utf-8") as f:
+					rawData = json.load(f)
+				normalizedData = self._normalizeProfileToOverrides(rawData)
+				self.profilesCache[appName] = normalizedData
+				logHandler.log.debug(f"{ADDON_NAME}: Refreshed cache for profile '{appName}'")
+			except (json.JSONDecodeError, OSError, IOError) as e:
+				logHandler.log.warning(f"{ADDON_NAME}: Failed to refresh cache for '{appName}': {e}")
+		else:
+			# Profile was deleted, remove from cache
+			self.profilesCache.pop(appName, None)
+			logHandler.log.debug(f"{ADDON_NAME}: Removed '{appName}' from cache (file deleted)")
 	
 	def getEffectiveConfig(self, appName):
 		"""Get effective configuration by merging global config + per-app overrides.
@@ -202,60 +266,31 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		return overrides
 	
 	def loadProfileForApp(self, appName):
-		"""Load profile for specific app. If no profile exists, keeps currentAppProfile="global".
+		"""Load profile for specific app from cache. If no profile exists, keeps currentAppProfile="global".
 		
+		Uses in-memory cache for instant profile switching (no file I/O).
 		Empty profiles ({}) are now supported and kept persistent - they represent
 		"same as global" but with explicit per-app tracking.
 		
 		Args:
 			appName: Application name to load profile for
 		"""
-		path = self.getProfilePath(appName)
-		if os.path.exists(path):
-			try:
-				with open(path, "r", encoding="utf-8") as f:
-					rawProfileData = json.load(f)
-				
-				# Migrate/normalize: convert full config to overrides-only
-				profileData = self._normalizeProfileToOverrides(rawProfileData)
-				
-				# Support empty profiles {} - they stay active and persistent
-				if not profileData:
-					logHandler.log.info(f"{ADDON_NAME}: Profile for {appName} exists but is empty (same as global)")
-					self.currentAppProfile = appName
-					self.currentProfileData = {}
-					# Save normalized/empty profile back to disk if migration occurred
-					if profileData != rawProfileData:
-						try:
-							with open(path, "w", encoding="utf-8") as f:
-								json.dump({}, f, indent=2)
-							logHandler.log.info(f"{ADDON_NAME}: Migrated profile for {appName} to empty format")
-						except Exception as e:
-							logHandler.log.error(f"{ADDON_NAME}: Failed to migrate profile for {appName}: {e}")
-					return
-				
-				# Save normalized profile back to disk (migration)
-				if profileData != rawProfileData:
-					try:
-						with open(path, "w", encoding="utf-8") as f:
-							json.dump(profileData, f, indent=2)
-						logHandler.log.info(f"{ADDON_NAME}: Migrated profile for {appName} to override-only format")
-					except Exception as e:
-						logHandler.log.error(f"{ADDON_NAME}: Failed to migrate profile for {appName}: {e}")
-				
-				self.currentProfileData = profileData
-				self.currentAppProfile = appName
-				logHandler.log.info(f"{ADDON_NAME}: Loaded profile overrides for {appName}")
-				return
-			except json.JSONDecodeError as e:
-				logHandler.log.error(f"{ADDON_NAME}: Invalid JSON in profile for {appName}: {e}", exc_info=True)
-			except Exception as e:
-				logHandler.log.error(f"{ADDON_NAME}: Error loading profile for {appName}: {e}", exc_info=True)
+		# Use cache for instant lookup (no file I/O)
+		if appName in self.profilesCache:
+			profileData = self.profilesCache.get(appName, {})
+			self.currentAppProfile = appName
+			self.currentProfileData = profileData.copy()  # Shallow copy for thread safety
+			
+			if profileData:
+				logHandler.log.info(f"{ADDON_NAME}: Loaded profile overrides for {appName} from cache")
+			else:
+				logHandler.log.info(f"{ADDON_NAME}: Profile for {appName} exists but is empty (same as global)")
+			return
 		
-		# No profile exists or failed to load - fall back to global (upstream behavior)
+		# No profile exists in cache - fall back to global (upstream behavior)
 		self.currentAppProfile = "global"
 		self.currentProfileData = {}
-		logHandler.log.info(f"{ADDON_NAME}: No valid profile for {appName}, using global config")
+		logHandler.log.info(f"{ADDON_NAME}: No cached profile for {appName}, using global config")
 	
 	def saveProfileForApp(self, appName, data):
 		"""Save profile for specific app. Profiles store only overrides.
@@ -269,19 +304,24 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			with open(path, "w", encoding="utf-8") as f:
 				json.dump(data, f, indent=2)
 			self.currentAppProfile = appName
-			self.currentProfileData = data
+			self.currentProfileData = data.copy()
+			# Update the cache to keep it in sync
+			self.profilesCache[appName] = data.copy()
 			logHandler.log.info(f"{ADDON_NAME}: Saved profile for {appName} (overrides only)")
-		except Exception as e:
+		except (OSError, IOError) as e:
 			logHandler.log.error(f"{ADDON_NAME}: Error saving profile for {appName}: {e}")
 	
 	def deleteProfileForApp(self, appName):
+		"""Delete profile for specific app and remove from cache."""
 		path = self.getProfilePath(appName)
 		if os.path.exists(path):
 			try:
 				os.remove(path)
 				logHandler.log.info(f"{ADDON_NAME}: Deleted profile for {appName}")
-			except Exception as e:
+			except (OSError, IOError) as e:
 				logHandler.log.error(f"{ADDON_NAME}: Error deleting profile for {appName}: {e}")
+		# Remove from cache
+		self.profilesCache.pop(appName, None)
 		self.loadGlobalProfile()
 	
 	def profileExists(self, appName):
@@ -350,8 +390,11 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			with open(path, "w", encoding="utf-8") as f:
 				json.dump({}, f, indent=2)
 			logHandler.log.info(f"{ADDON_NAME}: Cleared overrides for {appName}, wrote empty profile")
-		except Exception as e:
+		except (OSError, IOError) as e:
 			logHandler.log.error(f"{ADDON_NAME}: Error writing empty profile for {appName}: {e}", exc_info=True)
+		
+		# Update cache with empty profile
+		self.profilesCache[appName] = {}
 		
 		# Keep profile active but with no overrides (identical to global)
 		self.currentAppProfile = appName
