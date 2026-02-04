@@ -33,19 +33,19 @@ class frmMain(wx.Frame):
 		self.lblActiveProfile = wx.StaticText(panel, label=_("Active Profile: ") + backend.currentAppProfile)
 		mainSizer.Add(self.lblActiveProfile, 0, wx.ALL, 5)
 
-		# Create notebook with tabs - PROFILES FIRST, then SETTINGS
+		# Create notebook with tabs - SETTINGS FIRST, then PROFILES
 		self.notebook = wx.Notebook(panel)
 		mainSizer.Add(self.notebook, 1, wx.ALL | wx.EXPAND, 5)
 
-		# Tab 1: Profiles (FIRST as per requirements)
-		self.profilesTab = wx.Panel(self.notebook)
-		self.notebook.AddPage(self.profilesTab, _("Profiles"))
-		self._createProfilesTab(self.profilesTab)
-
-		# Tab 2: Settings (SECOND as per requirements)
+		# Tab 1: Settings (FIRST as per requirements)
 		self.settingsTab = wx.Panel(self.notebook)
 		self.notebook.AddPage(self.settingsTab, _("Settings"))
 		self._createSettingsTab(self.settingsTab, effectiveConfig)
+
+		# Tab 2: Profiles (SECOND as per requirements)
+		self.profilesTab = wx.Panel(self.notebook)
+		self.notebook.AddPage(self.profilesTab, _("Profiles"))
+		self._createProfilesTab(self.profilesTab)
 
 		# Close button (no OK/Cancel - settings saved explicitly)
 		actionSizer = wx.BoxSizer(wx.HORIZONTAL)
