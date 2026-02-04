@@ -700,6 +700,13 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 				continue
 			
 			try:
+				# Safety delay before screen capture to prevent access violations
+				time.sleep(0.1)
+				
+				# Double-check we're still running after the delay
+				if not self._keepRunning or not self._ocrActive.is_set():
+					continue
+				
 				# Snapshot config once per iteration under lock
 				# Copy ensures this iteration uses consistent config even if profile switches mid-scan
 				with self._profileLock:
@@ -709,8 +716,16 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 				# Rebuild targets with current config
 				targets = self.rebuildTargets(localConfig)
 				
-				# Perform OCR scan
-				self.OcrScreen(localConfig, appName, targets)
+				# Skip if targets couldn't be built
+				if not targets:
+					logHandler.log.warning(f"{ADDON_NAME}: No valid targets, skipping OCR scan")
+					continue
+				
+				# Perform OCR scan (wrapped in its own try-except for C-level exceptions)
+				try:
+					self.OcrScreen(localConfig, appName, targets)
+				except Exception as ocr_err:
+					logHandler.log.error(f"{ADDON_NAME}: OCR engine error: {ocr_err}")
 				
 				# Reset error counter on success
 				consecutive_errors = 0
@@ -880,6 +895,15 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			key: (appName, targetIndex) tuple for state tracking
 			configuredThreshold: similarity threshold for this scan
 		"""
+		# Safety check: validate result object before processing
+		if not result or not hasattr(result, 'text'):
+			logHandler.log.debug(f"{ADDON_NAME}: Invalid or empty OCR result, skipping")
+			return
+		
+		# Check if plugin is still running before processing
+		if not self._keepRunning:
+			return
+		
 		# Trigger cleanup with race condition protection
 		should_cleanup = False
 		with self._stateLock:
@@ -893,7 +917,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		
 		# Extract text directly from result object (no mock NVDAObject needed)
 		try:
-			text = result.text.strip() if hasattr(result, 'text') else ""
+			text = result.text.strip() if result.text else ""
 		except (AttributeError, TypeError) as e:
 			logHandler.log.warning(f"{ADDON_NAME}: Failed to extract text from OCR result: {e}")
 			text = ""
@@ -921,7 +945,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 				state["prevString"] = text
 		
 		# Thread-safe UI call: schedule on event queue instead of calling directly
-		if shouldSpeak:
+		# Only speak if plugin is still running
+		if shouldSpeak and self._keepRunning:
 			queueHandler.queueFunction(queueHandler.eventQueue, ui.message, textToSpeak)
 
 	__gestures={
