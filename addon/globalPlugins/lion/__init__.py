@@ -83,7 +83,7 @@ if not os.path.exists(PROFILES_DIR):
 	try:
 		os.makedirs(PROFILES_DIR)
 		logHandler.log.info(f"{ADDON_NAME}: Profiles directory created at {PROFILES_DIR}")
-	except (OSError, IOError) as e:
+	except OSError as e:
 		logHandler.log.error(f"{ADDON_NAME}: Failed to create profiles directory: {e}")
 
 
@@ -178,11 +178,11 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 						logHandler.log.debug(f"{ADDON_NAME}: Loaded profile '{profileName}' into cache")
 					except json.JSONDecodeError as e:
 						logHandler.log.warning(f"{ADDON_NAME}: Invalid JSON in profile '{profileName}', skipping: {e}")
-					except (OSError, IOError) as e:
+					except OSError as e:
 						logHandler.log.warning(f"{ADDON_NAME}: Failed to read profile '{profileName}', skipping: {e}")
 			
 			logHandler.log.info(f"{ADDON_NAME}: Loaded {len(self.profilesCache)} profiles into cache")
-		except (OSError, IOError) as e:
+		except OSError as e:
 			logHandler.log.error(f"{ADDON_NAME}: Failed to scan profiles directory: {e}")
 	
 	def refreshProfileCache(self, appName):
@@ -204,7 +204,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 				normalizedData = self._normalizeProfileToOverrides(rawData)
 				self.profilesCache[appName] = normalizedData
 				logHandler.log.debug(f"{ADDON_NAME}: Refreshed cache for profile '{appName}'")
-			except (json.JSONDecodeError, OSError, IOError) as e:
+			except (json.JSONDecodeError, OSError) as e:
 				logHandler.log.warning(f"{ADDON_NAME}: Failed to refresh cache for '{appName}': {e}")
 		else:
 			# Profile was deleted, remove from cache
@@ -281,7 +281,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		if appName in self.profilesCache:
 			profileData = self.profilesCache.get(appName, {})
 			self.currentAppProfile = appName
-			self.currentProfileData = profileData.copy()  # Shallow copy for thread safety
+			# Copy to avoid race conditions when OCR loop reads while focus event modifies
+			self.currentProfileData = profileData.copy()
 			
 			if profileData:
 				logHandler.log.info(f"{ADDON_NAME}: Loaded profile overrides for {appName} from cache")
@@ -327,12 +328,11 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			with open(path, "w", encoding="utf-8") as f:
 				json.dump(cleanData, f, indent=2)
 			self.currentAppProfile = appName
-			self.currentProfileData = cleanData.copy()
-			# Update the cache to keep it in sync
-			self.profilesCache[appName] = cleanData.copy()
+			# Share the same dict reference for efficiency (config values are immutable)
+			self.currentProfileData = self.profilesCache[appName] = cleanData
 			logHandler.log.info(f"{ADDON_NAME}: Saved profile for {appName} (overrides only)")
 			return True
-		except (OSError, IOError) as e:
+		except OSError as e:
 			logHandler.log.error(f"{ADDON_NAME}: Error saving profile for {appName}: {e}")
 			return False
 	
@@ -343,7 +343,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			try:
 				os.remove(path)
 				logHandler.log.info(f"{ADDON_NAME}: Deleted profile for {appName}")
-			except (OSError, IOError) as e:
+			except OSError as e:
 				logHandler.log.error(f"{ADDON_NAME}: Error deleting profile for {appName}: {e}")
 		# Remove from cache
 		self.profilesCache.pop(appName, None)
@@ -409,7 +409,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			with open(path, "w", encoding="utf-8") as f:
 				json.dump({}, f, indent=2)
 			logHandler.log.info(f"{ADDON_NAME}: Cleared overrides for {appName}, wrote empty profile")
-		except (OSError, IOError) as e:
+		except OSError as e:
 			logHandler.log.error(f"{ADDON_NAME}: Error writing empty profile for {appName}: {e}", exc_info=True)
 		
 		# Update cache with empty profile
@@ -699,10 +699,11 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 				continue
 			
 			try:
-				# Snapshot config once per iteration (thread-safe copy)
+				# Snapshot config once per iteration under lock
+				# Copy ensures this iteration uses consistent config even if profile switches mid-scan
 				with self._profileLock:
 					appName = self.currentAppProfile
-					localConfig = self.getEffectiveConfig(appName).copy()  # Shallow copy for thread safety
+					localConfig = self.getEffectiveConfig(appName).copy()
 				
 				# Rebuild targets with current config
 				targets = self.rebuildTargets(localConfig)

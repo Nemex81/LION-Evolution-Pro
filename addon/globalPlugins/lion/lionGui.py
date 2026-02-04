@@ -203,7 +203,7 @@ class frmMain(wx.Frame):
 							self.lstProfiles.SetItem(index, 1, _("Same as global"))
 						else:
 							self.lstProfiles.SetItem(index, 1, "")
-				except (OSError, IOError) as e:
+				except OSError as e:
 					logHandler.log.error(f"LionEvolutionPro: Error listing profiles directory: {e}")
 		except (wx.PyDeadObjectError, RuntimeError) as e:
 			logHandler.log.debug(f"LionEvolutionPro: UI error refreshing profile list: {e}")
