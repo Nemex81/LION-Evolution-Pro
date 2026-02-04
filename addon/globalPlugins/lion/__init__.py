@@ -52,6 +52,8 @@ import screenBitmap
 import logHandler
 import gui
 import tones
+import textInfos
+import speech
 import ui
 import time
 import queueHandler
