@@ -123,7 +123,9 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		self._profileLock = threading.Lock()
 		# OCR thread lifecycle management
 		self._ocrThread = None
-		self._ocrActive = threading.Event()  # Thread-safe control flag
+		self._ocrActive = threading.Event()  # Thread-safe control flag for OCR on/off
+		self._ocrPauseEvent = threading.Event()  # Pause/resume signal (set = running, clear = paused)
+		self._keepRunning = True  # Flag to terminate thread on plugin shutdown
 		self._ocrLock = threading.Lock()  # Prevent duplicate starts
 		# OCR state cache limits to prevent memory leak
 		self.MAX_STATE_ENTRIES_PER_APP = 10
@@ -414,11 +416,15 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			logHandler.log.exception(f"{ADDON_NAME}: Error in createMenu")
 
 	def terminate(self):
-		# Stop OCR thread first if it's running
-		if hasattr(self, '_ocrActive') and hasattr(self, '_ocrThread'):
+		# Signal OCR thread to stop permanently
+		self._keepRunning = False
+		
+		# Stop OCR thread if it's running
+		if hasattr(self, '_ocrPauseEvent') and hasattr(self, '_ocrThread'):
 			if self._ocrThread and self._ocrThread.is_alive():
 				logHandler.log.info(f"{ADDON_NAME}: Stopping OCR thread in terminate()")
-				self._ocrActive.clear()
+				# Wake up the thread if it's paused so it can exit
+				self._ocrPauseEvent.set()
 				self._ocrThread.join(timeout=3.0)
 				if self._ocrThread.is_alive():
 					logHandler.log.warning(f"{ADDON_NAME}: OCR thread did not stop in terminate()")
@@ -474,37 +480,37 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			ui.message(_("Error opening settings"))
 
 	def script_ReadLiveOcr(self, gesture):
-		"""Toggle OCR with robust thread management"""
-		repeat = getLastScriptRepeatCount()
-#		if repeat>=2:
-#			ui.message("o sa vine profile")
+		"""Toggle OCR using persistent thread with pause/resume.
 		
+		Instead of killing and recreating the thread, we use threading.Event
+		to pause/resume the OCR loop efficiently.
+		"""
 		with self._ocrLock:
-			if self._ocrThread and self._ocrThread.is_alive():
-				# Stop existing thread
+			# Check if OCR is currently active
+			is_running = self._ocrActive.is_set()
+			
+			if is_running:
+				# Pause OCR - just clear the events, don't kill thread
 				self._ocrActive.clear()
-				logHandler.log.info(f"{ADDON_NAME}: Stopping OCR thread...")
-		
-		# Wait outside lock to allow thread to finish
-		if self._ocrThread and self._ocrThread.is_alive():
-			self._ocrThread.join(timeout=2.0)
-			if self._ocrThread.is_alive():
-				logHandler.log.warning(f"{ADDON_NAME}: OCR thread did not stop gracefully")
-		
-		with self._ocrLock:
-			if self._ocrThread and self._ocrThread.is_alive():
-				# Still alive - user is stopping
+				self._ocrPauseEvent.clear()
 				tones.beep(222, 333)
 				queueHandler.queueFunction(queueHandler.eventQueue, ui.message, _("lion stopped"))
-				self._ocrThread = None
+				logHandler.log.info(f"{ADDON_NAME}: OCR paused")
 			else:
-				# Start new thread
+				# Resume or start OCR
 				self._ocrActive.set()
-				self._ocrThread = threading.Thread(target=self.ocrLoop, daemon=True)
-				self._ocrThread.start()
+				self._ocrPauseEvent.set()
+				
+				# Start thread if not already running
+				if self._ocrThread is None or not self._ocrThread.is_alive():
+					self._ocrThread = threading.Thread(target=self.ocrLoop, daemon=True)
+					self._ocrThread.start()
+					logHandler.log.info(f"{ADDON_NAME}: OCR thread started")
+				else:
+					logHandler.log.info(f"{ADDON_NAME}: OCR resumed")
+				
 				tones.beep(444, 333)
 				queueHandler.queueFunction(queueHandler.eventQueue, ui.message, _("lion started"))
-				logHandler.log.info(f"{ADDON_NAME}: OCR thread started")
 			
 	def event_gainFocus(self, obj, nextHandler):
 		"""Handle focus change with instant profile switch from cache.
@@ -654,52 +660,69 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		return targets
 	
 	def ocrLoop(self):
-		"""Main OCR loop with exception handling"""
-		logHandler.log.info(f"{ADDON_NAME}: OCR loop starting")
+		"""Main OCR loop with persistent thread model.
+		
+		Thread runs indefinitely until plugin termination.
+		Uses _ocrPauseEvent.wait() to efficiently pause when disabled.
+		"""
+		logHandler.log.info(f"{ADDON_NAME}: OCR loop starting (persistent thread)")
 		consecutive_errors = 0
 		max_consecutive_errors = 5
 		
-		while self._ocrActive.is_set():
+		while self._keepRunning:
+			# Wait for pause event - blocks efficiently when paused
+			self._ocrPauseEvent.wait()
+			
+			# Check if we should exit after waking up
+			if not self._keepRunning:
+				break
+			
+			# Check if OCR is actually enabled (double-check after wait)
+			if not self._ocrActive.is_set():
+				continue
+			
 			try:
-				# Snapshot config once per iteration
+				# Snapshot config once per iteration (thread-safe copy)
 				with self._profileLock:
 					appName = self.currentAppProfile
-					cfg = self.getEffectiveConfig(appName)
+					localConfig = self.getEffectiveConfig(appName).copy()  # Shallow copy for thread safety
 				
 				# Rebuild targets with current config
-				targets = self.rebuildTargets(cfg)
+				targets = self.rebuildTargets(localConfig)
 				
 				# Perform OCR scan
-				self.OcrScreen(cfg, appName, targets)
+				self.OcrScreen(localConfig, appName, targets)
 				
 				# Reset error counter on success
 				consecutive_errors = 0
 				
 				# Use config snapshot for interval
 				try:
-					interval = float(cfg.get("interval", config.conf["lion"]["interval"]))
+					interval = float(localConfig.get("interval", config.conf["lion"]["interval"]))
 				except (ValueError, TypeError, KeyError):
 					interval = float(config.conf["lion"]["interval"])
 				
-				# Use wait() instead of sleep() for immediate response to stop
-				self._ocrActive.wait(timeout=interval)
+				# Use wait() with timeout for interval - allows immediate response to pause/stop
+				self._ocrPauseEvent.wait(timeout=interval)
 				
 			except Exception:
 				consecutive_errors += 1
 				logHandler.log.exception(f"{ADDON_NAME}: Error in ocrLoop (attempt {consecutive_errors}/{max_consecutive_errors})")
 				
 				if consecutive_errors >= max_consecutive_errors:
-					logHandler.log.error(f"{ADDON_NAME}: Too many consecutive errors, stopping OCR")
+					logHandler.log.error(f"{ADDON_NAME}: Too many consecutive errors, pausing OCR")
 					self._ocrActive.clear()
+					self._ocrPauseEvent.clear()
 					queueHandler.queueFunction(queueHandler.eventQueue, ui.message, 
 						_("OCR stopped due to errors"))
-					break
+					# Don't break - let thread persist, can be restarted by user
+					continue
 				
 				# Exponential backoff on errors
 				backoff = min(5.0, 0.5 * (2 ** consecutive_errors))
-				self._ocrActive.wait(timeout=backoff)
+				self._ocrPauseEvent.wait(timeout=backoff)
 		
-		logHandler.log.info(f"{ADDON_NAME}: OCR loop exited")
+		logHandler.log.info(f"{ADDON_NAME}: OCR loop exited (thread terminating)")
 
 	def OcrScreen(self, cfg, appName, targets):
 		"""Perform OCR scan with robust error handling.
