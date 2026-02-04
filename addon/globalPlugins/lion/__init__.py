@@ -507,24 +507,19 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 				logHandler.log.info(f"{ADDON_NAME}: OCR thread started")
 			
 	def event_gainFocus(self, obj, nextHandler):
-		"""Handle focus change with OCR pause during profile switch"""
+		"""Handle focus change with instant profile switch from cache.
+		
+		Since profiles are now loaded from RAM cache (not disk I/O),
+		we no longer need to pause OCR during profile switching.
+		"""
 		try:
 			# Safe access to appModule and appName
 			appMod = getattr(obj, "appModule", None)
 			newAppName = getattr(appMod, "appName", None) if appMod else None
 			
 			if newAppName and newAppName != self.currentAppProfile and newAppName != "nvda":
-				# Pause OCR during profile switch to prevent race condition
-				was_active = False
-				if hasattr(self, '_ocrActive'):
-					was_active = self._ocrActive.is_set()
-					if was_active:
-						self._ocrActive.clear()
-						logHandler.log.debug(f"{ADDON_NAME}: Paused OCR for profile switch to {newAppName}")
-						# Brief wait for current iteration to complete
-						time.sleep(0.3)
-				
-				# Load profile (I/O not blocking OCR anymore)
+				# Load profile from cache (instant - no I/O)
+				# No need to pause OCR since this is a RAM lookup
 				with self._profileLock:
 					self.loadProfileForApp(newAppName)
 				
@@ -535,10 +530,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 					for k in keys_to_remove:
 						del self._ocrState[k]
 				
-				# Resume OCR with new profile
-				if was_active and hasattr(self, '_ocrActive'):
-					self._ocrActive.set()
-					logHandler.log.debug(f"{ADDON_NAME}: Resumed OCR with profile {newAppName}")
+				logHandler.log.debug(f"{ADDON_NAME}: Switched to profile {newAppName} (instant cache lookup)")
 					
 		except Exception:
 			# Never crash NVDA on focus events
