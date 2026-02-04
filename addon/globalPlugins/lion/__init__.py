@@ -62,9 +62,9 @@ import wx
 import locationHelper
 try:
 	from . import lionGui
-except Exception:
+except (ImportError, ModuleNotFoundError) as e:
 	lionGui = None
-	logHandler.log.error("LionEvolutionPro: Failed to import lionGui", exc_info=True)
+	logHandler.log.error(f"LionEvolutionPro: Failed to import lionGui: {e}", exc_info=True)
 from scriptHandler import getLastScriptRepeatCount, script
 
 from difflib import SequenceMatcher
@@ -83,7 +83,7 @@ if not os.path.exists(PROFILES_DIR):
 	try:
 		os.makedirs(PROFILES_DIR)
 		logHandler.log.info(f"{ADDON_NAME}: Profiles directory created at {PROFILES_DIR}")
-	except Exception as e:
+	except (OSError, IOError) as e:
 		logHandler.log.error(f"{ADDON_NAME}: Failed to create profiles directory: {e}")
 
 
@@ -300,18 +300,41 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		Args:
 			appName: Application name
 			data: Profile data dict (should contain only overrides)
+		
+		Returns:
+			bool: True if save succeeded, False otherwise
 		"""
+		# Validate input data
+		if data is None:
+			logHandler.log.error(f"{ADDON_NAME}: Cannot save None profile data for {appName}")
+			return False
+		
+		if not isinstance(data, dict):
+			logHandler.log.error(f"{ADDON_NAME}: Profile data for {appName} must be a dict, got {type(data)}")
+			return False
+		
+		# Validate keys and values (only allow known config keys)
+		validKeys = {"cropLeft", "cropRight", "cropUp", "cropDown", "target", "threshold", "interval"}
+		for key in data:
+			if key not in validKeys:
+				logHandler.log.warning(f"{ADDON_NAME}: Unknown key '{key}' in profile for {appName}, removing")
+		
+		# Filter to only valid keys
+		cleanData = {k: v for k, v in data.items() if k in validKeys}
+		
 		path = self.getProfilePath(appName)
 		try:
 			with open(path, "w", encoding="utf-8") as f:
-				json.dump(data, f, indent=2)
+				json.dump(cleanData, f, indent=2)
 			self.currentAppProfile = appName
-			self.currentProfileData = data.copy()
+			self.currentProfileData = cleanData.copy()
 			# Update the cache to keep it in sync
-			self.profilesCache[appName] = data.copy()
+			self.profilesCache[appName] = cleanData.copy()
 			logHandler.log.info(f"{ADDON_NAME}: Saved profile for {appName} (overrides only)")
+			return True
 		except (OSError, IOError) as e:
 			logHandler.log.error(f"{ADDON_NAME}: Error saving profile for {appName}: {e}")
+			return False
 	
 	def deleteProfileForApp(self, appName):
 		"""Delete profile for specific app and remove from cache."""
@@ -341,25 +364,19 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 	def profileHasOverrides(self, appName):
 		"""Check if a profile has non-empty overrides.
 		
+		Uses in-memory cache for efficient lookup.
+		
 		Args:
 			appName: Application name
 			
 		Returns:
 			bool: True if profile exists and has overrides, False if empty or doesn't exist
 		"""
-		if not self.profileExists(appName):
+		if appName not in self.profilesCache:
 			return False
 		
-		path = self.getProfilePath(appName)
-		try:
-			with open(path, "r", encoding="utf-8") as f:
-				data = json.load(f)
-			# Normalize to check if it has any overrides
-			normalized = self._normalizeProfileToOverrides(data)
-			return bool(normalized)
-		except Exception as e:
-			logHandler.log.error(f"{ADDON_NAME}: Error checking overrides for {appName}: {e}", exc_info=True)
-			return False
+		# Check cached profile data for non-empty overrides
+		return bool(self.profilesCache.get(appName, {}))
 	
 	def setActiveProfile(self, appName):
 		"""Set the active profile by loading the specified app profile.

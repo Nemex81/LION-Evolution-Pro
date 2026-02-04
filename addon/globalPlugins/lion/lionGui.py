@@ -186,24 +186,27 @@ class frmMain(wx.Frame):
 			# Use the PROFILES_DIR from the backend module
 			from . import PROFILES_DIR
 			if os.path.exists(PROFILES_DIR):
-				profileNames = []
-				for filename in sorted(os.listdir(PROFILES_DIR)):
-					if filename.endswith('.json'):
-						profileName = filename[:-5]  # Remove .json extension
-						profileNames.append(profileName)
-				
-				# Add profiles to list
-				for profileName in profileNames:
-					index = self.lstProfiles.InsertItem(self.lstProfiles.GetItemCount(), profileName)
-					if self.backend.currentAppProfile == profileName:
-						self.lstProfiles.SetItem(index, 1, _("Active Profile"))
-					elif not self.backend.profileHasOverrides(profileName):
-						# Profile exists but has no overrides (empty {})
-						self.lstProfiles.SetItem(index, 1, _("Same as global"))
-					else:
-						self.lstProfiles.SetItem(index, 1, "")
-		except Exception:
-			logHandler.log.exception("LionEvolutionPro: Error refreshing profile list")
+				try:
+					profileNames = []
+					for filename in sorted(os.listdir(PROFILES_DIR)):
+						if filename.endswith('.json'):
+							profileName = filename[:-5]  # Remove .json extension
+							profileNames.append(profileName)
+					
+					# Add profiles to list
+					for profileName in profileNames:
+						index = self.lstProfiles.InsertItem(self.lstProfiles.GetItemCount(), profileName)
+						if self.backend.currentAppProfile == profileName:
+							self.lstProfiles.SetItem(index, 1, _("Active Profile"))
+						elif not self.backend.profileHasOverrides(profileName):
+							# Profile exists but has no overrides (empty {})
+							self.lstProfiles.SetItem(index, 1, _("Same as global"))
+						else:
+							self.lstProfiles.SetItem(index, 1, "")
+				except (OSError, IOError) as e:
+					logHandler.log.error(f"LionEvolutionPro: Error listing profiles directory: {e}")
+		except (wx.PyDeadObjectError, RuntimeError) as e:
+			logHandler.log.debug(f"LionEvolutionPro: UI error refreshing profile list: {e}")
 
 	def _addSpin(self, sizer, parent, label, value):
 		"""Helper to add a spin control with label"""
