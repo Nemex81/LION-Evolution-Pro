@@ -1,0 +1,23 @@
+allowed_actions:
+  - commit
+  - push
+  - create_pr
+  - run_tests
+  - regen_gui
+
+allowed_paths:
+  - ".github/**"
+  - "addon/**"
+
+require_branch: true
+require_checks_pass: true
+max_changes_per_commit: 50
+
+require_human_approval_for:
+  - release
+  - publish
+
+notes: |
+  Questo file dichiara le azioni che l'agente può eseguire automaticamente senza
+  chiedere permesso esplicito ogni volta. Modifica con attenzione: mantieni i
+  percorsi limitati e richiedi approvazione umana per operazioni sensibili.
